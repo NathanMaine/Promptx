@@ -155,10 +155,19 @@ bodies, and not config values.
 anywhere the agent needs a precise target. This is where the loops happen and
 where the payoff is.
 
-**Skip it for INVESTIGATE tasks.** Audits, code review, "what does this module
-actually do." promptx sees file *names*, not file *contents*, so asked to
-investigate it will confidently invent findings about code it never read. Your
-coding agent can actually open the files. Ask it directly.
+**For INVESTIGATE tasks — audits, code review, "what does this module actually
+do" — run `--scan` first.** Without an index promptx sees only file names and
+will correctly refuse; there is nothing there to reason from. With one it
+becomes a good *planner*. Asked to audit this project for security problems it
+named `safe_root()` (path traversal), `store_index()` (what it accepts and
+writes), and `scan()` (symlink handling) — the right functions out of the
+codebase, with what to check in each.
+
+What it still will not do is tell you whether `safe_root()` actually has a bug.
+That needs the function body, which the map does not carry, so it instructs the
+agent to read that specific file rather than inventing a finding. Investigation
+gets a focused plan, not an answer — the right division of labour, since your
+coding agent can open the files and promptx cannot.
 
 **Skip it when you're already specific.** "Fix the typo on line 42 of
 `utils.py`" does not need expanding, and promptx will pad it if you insist.
