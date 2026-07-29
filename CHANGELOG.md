@@ -26,6 +26,12 @@ Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 - Indiscriminate-suite detection in `--check`: green-before/green-after with
   identical counts now yields `OK (unproven)` instead of a bare OK, and build
   specs must include a test that fails before and passes after.
+- Three defects caught by adversarial self-review the same day they shipped:
+  indiscriminate detection was dead code (summary strings embed wall-clock
+  timing, so equality never matched a real suite), the phantom-path lint
+  false-positived on every Do-NOT section, and the create-existing check
+  matched only the literal verb "create". All fixed and retested in both
+  directions — see FIELD-NOTES bug 10.
 
 ### Fixed
 - Work orders silently truncated at `max_tokens` (900 -> 2400, plus an explicit
