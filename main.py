@@ -84,9 +84,10 @@ import them.
    - State: report numbers exactly as printed, including failures. Do not round,
      total, or characterize them. If something fails, say so and stop.
 5. Add a short "Do NOT" section naming the likeliest wrong turn for this task.
+5b. If the request admits more than one reasonable reading (e.g. "coverage" could mean test coverage or feature coverage), the FIRST line of your output must be:  READ AS: <the reading you chose>  — one line, so a wrong choice is caught in one second instead of after an hour of correct work on the wrong goal. If only one reading is sensible, omit the line entirely; do not use it to restate obvious requests.
 6. Under 250 words. Dense and specific, not padded.
 7. Output ONLY the work order. No preamble, no reasoning, no commentary about \
-what you did. Do not explain your process. Begin directly with the first step.
+what you did. Do not explain your process. Begin directly with the first step (or the READ AS line when present).
 
 If the request is already specific, tighten it rather than inflating it."""
 
@@ -172,9 +173,9 @@ def enforce_verification(text, idx):
     """
     if not idx or promptx_index is None:
         return text
-    if promptx_index.has_verification(text):
-        return text
-    return text.rstrip() + "\n\n" + promptx_index.verification_block(idx)
+    if not promptx_index.has_verification(text):
+        text = text.rstrip() + "\n\n" + promptx_index.verification_block(idx)
+    return text + promptx_index.lint_block(promptx_index.lint_plan(text, idx))
 
 
 def do_scan_cli(root, push=False):

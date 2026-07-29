@@ -199,15 +199,25 @@ the check that proves it took: `grep '^docker:' /etc/group`.
 
 ## OPEN
 
-### A. Nothing checks whether the plan is sound
-The verification gate proves the agent *ran* something. Nothing checks the work
-order itself for a step depending on a file created two steps later, a missed
-dependency, or an inverted order.
+### ~~A. Nothing checks whether the plan is sound~~ — MOSTLY SOLVED
 
-This is the one place a second model genuinely earns its cost, because plan
-soundness is judgement rather than derivation. It would want the **strongest**
-cheap model available, not the weakest — an unskeptical model asked to audit
-will rubber-stamp.
+Re-examined: most of "is this plan sound?" is derivable, not judgement. Four
+checks now run automatically over every generated work order (`lint_plan`):
+
+1. "Create `X`" where X already exists in the index — **catches bug 8's exact
+   spec**, verified against the verbatim text that shipped.
+2. A step references a path not created until a later step.
+3. A path that neither exists nor is created by any step.
+4. A verification gate that runs pytest in a project with no test files.
+
+Findings are appended as a `## PLAN LINT` section — surfaced, not silently
+fixed, because the model may know something the map does not (that is how
+bug 8 happened in the first place).
+
+The residue that genuinely needs judgement — "is this approach *good*?" —
+remains open as an opt-in model audit, and wants the strongest cheap model
+(Haiku 4.5), not the weakest. An unskeptical model asked to audit will
+rubber-stamp.
 
 ### ~~B. Nothing compares what changed against what was specified~~ — SOLVED
 ### ~~C. Silent scope creep is invisible~~ — SOLVED
@@ -245,11 +255,20 @@ All three caught. Exit 1 on mismatch, so it composes with `&&`.
 whether the agent worked or slept. Tests prove the code works; the diff proves
 the agent did something. Neither alone is sufficient.
 
-### D. Ambiguity is resolved silently
-The expander commits to one reading with no signal that it chose. Asked to
-"make sure there is 100% coverage" it picked *test* coverage and never said so.
-A one-shot rewriter cannot ask a clarifying question; surfacing the ambiguity
-instead of resolving it would be strictly better and does not exist yet.
+### ~~D. Ambiguity is resolved silently~~ — SOLVED
+
+A one-shot rewriter cannot ask a clarifying question, but it can *declare*.
+The system prompt now requires that when a request admits more than one
+reasonable reading, the first line of the work order is:
+
+```
+READ AS: <the reading it chose>
+```
+
+Verified against the request that motivated this: "make sure there is 100%
+coverage" now opens with `READ AS: Ensure 100% test coverage...` — the silent
+choice is now a one-second check. An unambiguous request produces no line at
+all, verified in the same run.
 
 ### E. The browser extractor is weaker than the CLI
 Client-side scanning uses regex where the CLI uses `ast`, and caps at 400

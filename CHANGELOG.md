@@ -18,6 +18,11 @@ Notable changes. Bug detail — symptom, diagnosis, fix — lives in
   the test result before the agent works; afterwards reports specified paths
   never touched, unspecified changes, and the before/after suite result from an
   independent run. Exit 1 on mismatch. Closes #2 and #3.
+- Plan lint: four mechanical coherence checks on every generated work order —
+  create-existing, use-before-create, phantom paths, unreachable verification.
+  Catches the FIELD-NOTES bug-8 spec verbatim. Mostly closes #1.
+- `READ AS:` line — ambiguous requests now declare the chosen reading on line
+  one instead of resolving it silently. Closes #4.
 
 ### Fixed
 - Work orders silently truncated at `max_tokens` (900 -> 2400, plus an explicit

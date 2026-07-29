@@ -655,6 +655,99 @@ def has_verification(text):
 
 
 # --------------------------------------------------------------------------
+# plan lint — mechanical coherence checks on the generated work order
+# --------------------------------------------------------------------------
+#
+# Most of "is this plan sound?" turns out to be derivable, not judgement:
+# whether a file exists is an index lookup, and whether step 4 uses something
+# step 7 creates is arithmetic on step numbers. A model audit can catch the
+# rest, but these four never need one — and unlike a model, they cannot be
+# talked out of it by a plausible-sounding step.
+
+_CREATE_RE = re.compile(r"\bcreate\b[^`\n]{0,80}`([^`\n]{2,120})`", re.I)
+_STEP_RE = re.compile(r"^\s{0,3}(?:step\s+)?(\d{1,2})[.):]\s", re.I | re.M)
+
+
+def _spec_steps(text):
+    """[(step_number, step_text)] — resilient to formatting variation."""
+    marks = list(_STEP_RE.finditer(text or ""))
+    steps = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        steps.append((int(m.group(1)), text[m.start():end]))
+    return steps
+
+
+def lint_plan(text, index):
+    """Findings about the work order that are provably wrong against the index.
+
+    Returns a list of one-line strings; empty means nothing provable is wrong
+    (which is NOT the same as the plan being good).
+    """
+    if not text or not index or not index.get("files"):
+        return []
+    known = set(index["files"])
+    findings = []
+
+    steps = _spec_steps(text)
+    created = {}          # path -> step number that creates it
+    for num, body in steps:
+        for m in _CREATE_RE.finditer(body):
+            path = m.group(1).strip().lstrip("./")
+            created.setdefault(path, num)
+            # check 1: told to create a file that already exists.
+            # This exact failure shipped once — see FIELD-NOTES bug 8.
+            if path in known:
+                findings.append(
+                    f"step {num} says to CREATE `{path}` — it already exists "
+                    f"({index['files'][path].get('size', '?')} bytes). "
+                    f"If the map missed why (e.g. sys.path), verify before overwriting.")
+
+    # check 2: a step uses a path before the step that creates it
+    for num, body in steps:
+        for m in re.finditer(r"`([^`\n]{2,120})`", body):
+            path = m.group(1).strip().lstrip("./")
+            if path in created and created[path] > num and path not in known:
+                findings.append(
+                    f"step {num} references `{path}` but it is not created "
+                    f"until step {created[path]} — order is inverted.")
+
+    # check 3: paths that neither exist nor are created by any step
+    mentioned = set()
+    for m in re.finditer(r"`([^`\n]{2,120})`", text):
+        tok = m.group(1).strip().lstrip("./")
+        if "/" in tok and re.search(r"\.\w{1,5}$", tok):
+            mentioned.add(tok)
+    for path in sorted(mentioned):
+        if path not in known and path not in created:
+            findings.append(
+                f"`{path}` is referenced but does not exist and no step "
+                f"creates it — possible typo or invented path.")
+
+    # check 4: verification gate that cannot run
+    low = text.lower()
+    if "pytest" in low and not any(
+            n.startswith(("tests/", "test/")) or pathlib.Path(n).name.startswith("test_")
+            for n in known if n.endswith(".py")):
+        if not any("test" in p for p in created):
+            findings.append(
+                "verification runs pytest, but the project has no test files "
+                "and no step creates any — the gate can never pass.")
+
+    return findings
+
+
+def lint_block(findings):
+    """Render findings as a section appended to the work order."""
+    if not findings:
+        return ""
+    L = ["", "## PLAN LINT — provable inconsistencies, check before executing", ""]
+    for f in findings:
+        L.append(f"- {f}")
+    return "\n".join(L)
+
+
+# --------------------------------------------------------------------------
 # rendering into the prompt
 # --------------------------------------------------------------------------
 

@@ -64,9 +64,10 @@ import them.
    - State: report numbers exactly as printed, including failures. Do not round,
      total, or characterize them. If something fails, say so and stop.
 5. Add a short "Do NOT" section naming the likeliest wrong turn for this task.
+5b. If the request admits more than one reasonable reading (e.g. "coverage" could mean test coverage or feature coverage), the FIRST line of your output must be:  READ AS: <the reading you chose>  — one line, so a wrong choice is caught in one second instead of after an hour of correct work on the wrong goal. If only one reading is sensible, omit the line entirely; do not use it to restate obvious requests.
 6. Under 250 words. Dense and specific, not padded.
 7. Output ONLY the work order. No preamble, no reasoning, no commentary about \
-what you did. Begin directly with the first step.
+what you did. Begin directly with the first step (or the READ AS line when present).
 
 IMPORTANT: You can see file NAMES but not file CONTENTS. If the task requires \
 reading code to answer (an audit, a review, "what does X do"), do NOT invent \
@@ -226,6 +227,8 @@ def expand(request, model, ctx_dir):
         idx = promptx_index.load_index(ctx_dir, INDEX_DIR)
         if idx and not promptx_index.has_verification(text):
             text = text + "\n\n" + promptx_index.verification_block(idx)
+        if idx:
+            text += promptx_index.lint_block(promptx_index.lint_plan(text, idx))
     return text, None
 
 
