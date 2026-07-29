@@ -78,7 +78,13 @@ must contain. A missing sibling module is the single most common cause of \
 import-error loops.
 3. State the order of operations. Create dependencies BEFORE the files that \
 import them.
-4. End with an explicit verification step — a command to run that proves it worked.
+4. End with a VERIFICATION section the agent cannot fake:
+   - Give exact commands. Prefer `python3` over `python` — `python` is often absent.
+   - Run the WHOLE suite, never a single test file.
+   - Demand the raw output pasted VERBATIM — not summarized, not counted by hand.
+   - Include a command that proves which files changed (e.g. `git diff --stat`).
+   - State: report numbers exactly as printed, including failures. Do not round,
+     total, or characterize them. If something fails, say so and stop.
 5. Add a short "Do NOT" section naming the likeliest wrong turn for this task.
 6. Under 250 words. Dense and specific, not padded.
 7. Output ONLY the work order. No preamble, no reasoning, no commentary about \
