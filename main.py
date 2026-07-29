@@ -147,14 +147,34 @@ def repo_context(root, max_files=120):
     return "\n".join(out) if out else "(empty directory)"
 
 
-def deep_context(root):
-    """Rendered structural map for a folder, if it has been scanned."""
+def load_idx(root):
+    """The stored index for a folder, or None."""
     if promptx_index is None or not root:
         return None
     idx = promptx_index.load_index(root, INDEX_DIR)
-    if not idx or not idx.get("files"):
-        return None
-    return promptx_index.render(idx)
+    return idx if (idx and idx.get("files")) else None
+
+
+def deep_context(root):
+    """Rendered structural map for a folder, if it has been scanned."""
+    idx = load_idx(root)
+    return promptx_index.render(idx) if idx else None
+
+
+def enforce_verification(text, idx):
+    """Guarantee the work order ends with a gate that demands evidence.
+
+    The system prompt asks for one, and usually gets it — but "usually" is the
+    wrong standard for the step whose absence let an agent report a green suite
+    it never ran. So this is decided in code: if the model's own gate does not
+    demand verbatim output, a derived one is appended. No second model, because
+    a probabilistic check on the honesty layer defeats the point.
+    """
+    if not idx or promptx_index is None:
+        return text
+    if promptx_index.has_verification(text):
+        return text
+    return text.rstrip() + "\n\n" + promptx_index.verification_block(idx)
 
 
 def do_scan_cli(root, push=False):
@@ -303,9 +323,11 @@ def main():
     if not args.request:
         ap.error("give me a request, or use --models")
 
-    deep = deep_context(args.context) if args.context else None
+    idx = load_idx(args.context) if args.context else None
+    deep = promptx_index.render(idx) if idx else None
     ctx = None if deep else (repo_context(args.context) if args.context else None)
     result = expand(" ".join(args.request), args.model, ctx, args.local, deep=deep)
+    result = enforce_verification(result, idx)
 
     if args.raw or args.exec:
         print(result)

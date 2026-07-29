@@ -211,7 +211,15 @@ def expand(request, model, ctx_dir):
     for marker in ("</think>", "</thinking>"):
         if marker in text:
             text = text.split(marker)[-1]
-    return text.strip(), None
+    text = text.strip()
+
+    # Guarantee the evidence gate in code, not by sampling. See
+    # promptx_index.verification_block for why this is not a second model.
+    if deep and promptx_index is not None:
+        idx = promptx_index.load_index(ctx_dir, INDEX_DIR)
+        if idx and not promptx_index.has_verification(text):
+            text = text + "\n\n" + promptx_index.verification_block(idx)
+    return text, None
 
 
 PAGE = """<!doctype html>

@@ -263,6 +263,9 @@ def scan(root, cache_dir, force=False):
         "parsed": parsed,
         "reused": reused,
         "truncated": len(files) >= MAX_FILES,
+        # .git is in SKIP_DIRS so it never appears in files — record it here,
+        # because the verification block needs to know whether `git diff` works.
+        "vcs": "git" if (root / ".git").exists() else None,
         "files": files,
     }
 
@@ -292,6 +295,92 @@ def list_indexed(cache_dir):
         except (json.JSONDecodeError, OSError):
             continue
     return sorted(out, key=lambda r: -r["scanned_at"])
+
+
+# --------------------------------------------------------------------------
+# the verification gate
+# --------------------------------------------------------------------------
+
+# Marker for "this build produces a runnable test command", detected from the
+# index rather than guessed. Order matters: first match wins per language.
+_TEST_RUNNERS = [
+    ("package.json",   "npm test"),
+    ("Cargo.toml",     "cargo test"),
+    ("go.mod",         "go test ./..."),
+    ("Gemfile",        "bundle exec rspec"),
+    ("pom.xml",        "mvn -q test"),
+    ("build.gradle",   "./gradlew test"),
+]
+
+
+def test_command(index):
+    """The command that proves this project still works, or None.
+
+    Derived from files that are actually present. Guessing here is worse than
+    saying nothing: a verification step that cannot run teaches the agent to
+    skip verification.
+    """
+    files = index.get("files") or {}
+    names = set(files)
+
+    # Python: only claim pytest if there is something for it to collect.
+    has_py_tests = any(
+        n.startswith(("tests/", "test/")) or pathlib.Path(n).name.startswith("test_")
+        for n in names if n.endswith(".py"))
+    if has_py_tests:
+        return "python3 -m pytest -q"
+
+    for marker, cmd in _TEST_RUNNERS:
+        if marker in names:
+            return cmd
+    return None
+
+
+def verification_block(index):
+    """A verification section the agent cannot satisfy by describing it.
+
+    Built in code, not by a model. Whether a verification gate exists at all is
+    not a judgement call — it is the one part of the work order that must be
+    present every time, so it must not depend on sampling.
+    """
+    lines = ["## VERIFICATION — paste raw output, do not summarize", ""]
+    cmds = []
+
+    cmd = test_command(index)
+    if cmd:
+        cmds.append(cmd)
+    if (index or {}).get("vcs") == "git":
+        cmds.append("git diff --stat")
+        cmds.append("git status --porcelain")
+
+    if cmds:
+        lines.append("```bash")
+        lines.extend(cmds)
+        lines.append("```")
+        lines.append("")
+    lines.append(
+        "Paste the output of every command above VERBATIM — the exact final "
+        "summary line included. Do not count, total, round, or characterize "
+        "the results, and do not report a subset as if it were the whole run. "
+        "If anything fails, say so plainly and stop rather than continuing.")
+    if not cmds:
+        lines.append("")
+        lines.append(
+            "No test runner was detected in this project, so state exactly "
+            "which files you changed and how you confirmed each one.")
+    return "\n".join(lines)
+
+
+def has_verification(text):
+    """Did the model already produce a gate that demands evidence?
+
+    Requires both a verification heading and an explicit verbatim demand — a
+    heading alone is what produced 'all 6 tests pass' from a 2-test run.
+    """
+    low = (text or "").lower()
+    return ("verif" in low
+            and ("verbatim" in low or "exactly as printed" in low
+                 or "do not summarize" in low))
 
 
 # --------------------------------------------------------------------------
