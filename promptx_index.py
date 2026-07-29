@@ -755,7 +755,16 @@ def lint_plan(text, index):
         line = text[line_start:text.find("\n", m.start()) if text.find("\n", m.start()) != -1 else len(text)]
         if re.search(r"\bdo\s+not\b|\bdon'?t\b|\bnever\b|\bavoid\b|\bleave\b", line, re.I):
             continue
-        tok = m.group(1).strip().lstrip("./")
+        tok = m.group(1).strip()
+        # Backticks wrap commands and scratch paths too, not just project
+        # files. Without these guards a verification block like
+        # `pytest ... | tee /tmp/out.txt` gets reported as four invented
+        # paths, which trains you to ignore the whole section.
+        if re.search(r"[|;&$><*(){}\[\]]|\s", tok):
+            continue                      # a shell command, not a path
+        if tok.startswith(("/", "~")):
+            continue                      # absolute/scratch path, not repo-relative
+        tok = tok.lstrip("./")
         if "/" in tok and re.search(r"\.\w{1,5}$", tok):
             mentioned.add(tok)
     for path in sorted(mentioned):
