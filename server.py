@@ -526,18 +526,27 @@ function pushHint(d){
 function drawIx(){
   const d=$('dir').value.trim(),f=curFolder(),s=$('ixstat');
   const scan=$('scan'),ref=$('refresh');
+  $('pick').textContent='Scan a folder on this computer…';
   if(!d){s.textContent='';s.className='ixstat';scan.hidden=true;ref.hidden=true;return}
   const here=onThisHost(d);
+  const base=d.replace(/\/+$/,'').split('/').pop();
   if(f&&f.indexed){
+    const age=Math.floor(Date.now()/1000)-f.scanned_at;
+    const stale=age>1800;   /* 30 min: agents edit fast */
     if(here){
       s.textContent='indexed · '+f.file_count+' files · '+fmtAge(f.scanned_at);
       s.className='ixstat on';scan.hidden=true;ref.hidden=false}
     else{
-      /* A pushed index. This host cannot rescan it — offering Refresh would
-         just produce a path error. Show the command that actually works. */
+      /* A pushed index. This host cannot rescan the laptop, and on plain HTTP
+         the browser cannot re-read a folder without a user gesture either —
+         so the one-click Rescan button below opens the native picker; picking
+         the folder again is the whole interaction. */
       s.innerHTML='indexed from another machine · '+f.file_count+' files · '+
-        fmtAge(f.scanned_at)+'<br>to update: '+pushHint(d);
-      s.className='ixstat on';scan.hidden=true;ref.hidden=true}}
+        fmtAge(f.scanned_at)+
+        (stale?' <b>⚠ may be stale — if the agent edited files, rescan before expanding</b>':'');
+      s.className=stale?'ixstat err':'ixstat on';scan.hidden=true;ref.hidden=true;
+      $('pick').textContent='Rescan “'+base+'”…'}
+    }
   else{
     if(here){
       s.textContent='not indexed — it can see file names only';
@@ -622,6 +631,8 @@ function pyOutline(src){
     defs.push((m[1].length?'    .':'def ')+m[2].replace(/\s+/g,' '));
   for(const m of code.matchAll(/^[ \t]*class\s+(\w+)/gm))defs.push('class '+m[1]);
   for(const m of code.matchAll(/^([A-Z][A-Z0-9_]{2,})\s*=/gm))defs.push(m[1]+' = ...');
+  for(const m of code.matchAll(/^sys\.path\.(insert|append)\(([^)\n]{0,90})/gm))
+    defs.push('sys.path.'+m[1]+'('+m[2]+')  — imports below resolve relative to this');
   return {imports:uniq(imports,20),defs:defs.slice(0,MAX_ENTRIES),doc:doc}}
 
 function jsOutline(src){
