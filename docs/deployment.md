@@ -149,22 +149,50 @@ adds a promptx card to a containerized nginx dashboard. It is idempotent.
 sudo bash scripts/add-promptx-tile.sh
 ```
 
-**The trap it exists to solve:** a dashboard served by a Docker container
-usually keeps its HTML *inside the container*, not on the host. Editing the
-host-side `nas-home.html` you originally wrote appears to work — the file
+**The trap it exists to solve**, because it cost hours here: a dashboard served
+by a Docker container keeps its HTML in a **named volume**, not on the host
+where you wrote it. Editing the host-side file appears to work — the file
 changes, the backup is made, everything looks right — and the served page never
-updates, because nginx is reading a copy baked into the image.
+updates.
 
-Diagnosing it takes one command:
+Two things compounded it in this case:
+
+1. The volume lives at `/volume2/@docker/volumes/nas_home_data/_data`, which is
+   **root-only**. Filesystem searches run as a normal user skip it silently,
+   because `find ... 2>/dev/null` hides the permission errors. It genuinely
+   looks like no copy exists anywhere.
+2. The served file is named `index.html`. The host file was `nas-home.html`.
+   Searching for the filename you know finds nothing useful.
+
+Diagnosing it takes one command — write a *new* file into the directory you
+believe is the web root, and ask the server for it:
 
 ```bash
-# write a new file into the directory you think is the web root
 ssh nas 'echo hi > /path/you/think/is/webroot/probe.html'
 curl -o /dev/null -w '%{http_code}\n' http://nas:8888/probe.html
 ```
 
 `404` means it is not the web root, no matter how many correctly-named files
-live there. `200` means it is.
+live there. `200` means it is. This test is worth reaching for early; it is
+faster and more conclusive than any amount of searching.
+
+Once you have Docker access, the answer is immediate:
+
+```bash
+docker inspect <container> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+```
+
+And the edit itself is `docker cp` out, modify, `docker cp` back:
+
+```bash
+docker cp nas-home:/usr/share/nginx/html/index.html /tmp/dash.html
+# edit /tmp/dash.html
+docker cp /tmp/dash.html nas-home:/usr/share/nginx/html/index.html
+docker exec nas-home chown 1000:wheel /usr/share/nginx/html/index.html
+```
+
+Restore the ownership after copying in — `docker cp` writes as root, and nginx
+will still serve it, but the file no longer matches its neighbours.
 
 The script finds the container publishing the port, locates the HTML inside it,
 injects the card, and copies it back — which requires docker, which requires
