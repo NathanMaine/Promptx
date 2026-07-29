@@ -173,8 +173,20 @@ root or membership in the `docker` group.
 To manage containers without `sudo` every time:
 
 ```bash
-sudo usermod -aG docker $USER   # then log out and back in
+sudo gpasswd -a "$USER" docker   # then log out and back in
 ```
+
+**Use `gpasswd`, not `usermod`.** UGOS does not ship `usermod`, `adduser`, or
+`addgroup` — only `gpasswd`. The usual `sudo usermod -aG docker $USER` fails
+with "command not found," and because the failure is quiet if you are not
+watching, it looks like it worked. Verify it actually took:
+
+```bash
+grep '^docker:' /etc/group     # your username should be after the last colon
+```
+
+An empty field there means nothing happened, regardless of what the command
+appeared to do.
 
 Consider what that grants before running it: the `docker` group is effectively
 root on that host, since it can mount the host filesystem into a container.
