@@ -227,6 +227,7 @@ you catch in an hour.
 - [docs/models.md](docs/models.md) — picking an expander model, and why reasoning models are wrong here
 - [docs/deployment.md](docs/deployment.md) — hosting it on a NAS or server, with systemd
 - [docs/prompt-design.md](docs/prompt-design.md) — why the system prompt says what it says, and what happened when it didn't
+- [docs/FIELD-NOTES.md](docs/FIELD-NOTES.md) — running log of bugs found in real use, what fixed them, and what is still open
 
 ## License
 

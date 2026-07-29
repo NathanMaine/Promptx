@@ -233,7 +233,7 @@ def expand(request, model, context=None, local=False, timeout=180, deep=None):
         "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                      {"role": "user", "content": user}],
         "temperature": 0.3,
-        "max_tokens": 900,
+        "max_tokens": 2400,
     }
     headers = {"Content-Type": "application/json"}
     url = LOCAL_URL if local else OPENROUTER_URL
@@ -263,7 +263,15 @@ def expand(request, model, context=None, local=False, timeout=180, deep=None):
     for marker in ("</think>", "</thinking>"):
         if marker in text:
             text = text.split(marker)[-1]
-    return text.strip()
+    text = text.strip()
+
+    # A work order that stops mid-sentence is worse than a short one: the agent
+    # executes the visible steps and never learns the rest existed. Surface it.
+    if (data.get("choices") or [{}])[0].get("finish_reason") == "length":
+        text += ("\n\n**WARNING — this work order was CUT OFF at the token limit "
+                 "and is incomplete.** Steps after the last one shown are missing. "
+                 "Narrow the request, or point -c at a subdirectory.")
+    return text
 
 
 def main():

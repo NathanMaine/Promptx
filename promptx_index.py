@@ -104,6 +104,21 @@ def _python_outline(src):
             for t in node.targets:
                 if isinstance(t, ast.Name) and t.id.isupper():
                     defs.append(f"{t.id} = ...")
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            # sys.path manipulation changes what every import in the file
+            # RESOLVES TO. Without it, a test importing `swarm.foo` while the
+            # file lives at src/swarm/foo.py looks like a missing module, and
+            # the expander will confidently tell the agent to create a file
+            # that already exists. Seen in the wild; worth the four lines.
+            fn = node.value.func
+            if (isinstance(fn, ast.Attribute)
+                    and fn.attr in ("insert", "append")
+                    and isinstance(fn.value, ast.Attribute)
+                    and fn.value.attr == "path"):
+                arg = node.value.args[-1] if node.value.args else None
+                shown = ast.unparse(arg)[:90] if arg is not None else "?"
+                defs.append(f"sys.path.{fn.attr}({shown})  "
+                            f"— imports below resolve relative to this")
 
     return {"imports": sorted(set(imports))[:20],
             "defs": defs[:MAX_ENTRIES_PER_FILE],
