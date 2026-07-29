@@ -30,6 +30,26 @@ promptx [-c DIR] [-x] [-m MODEL] [--local] [--copy] [--raw] [--models] REQUEST..
 | `--raw` | Print the work order with no header or separators. Good for piping. |
 | `--models` | Print the suggested-model table and exit. |
 
+### Which install sees which filesystem
+
+If you run both a local copy and a hosted one, this catches people out: **each
+install can only see the filesystem of the machine it runs on.**
+
+| Install | Reached at | Can send a tree for |
+|---|---|---|
+| Local (`promptx`, `promptx-web`) | your own terminal / `localhost:7331` | your laptop's filesystem |
+| Hosted (`server.py`) | `http://<nas-ip>:7331` from any device | paths under `PROJECT_ROOTS` on that host |
+
+The hosted UI's project-folder field is not a file picker for your computer —
+it takes an absolute path **on the server**, and rejects anything outside
+`PROJECT_ROOTS`. Typing `/Users/you/myproject` into the NAS-hosted UI will not
+work, because that path does not exist on the NAS.
+
+So: hosted copy for projects that live on the server, and for reaching promptx
+from a phone or a machine with nothing installed. Local copy for whatever you
+are actually coding on. Leaving the folder blank works in either, and gets you
+generic invented paths — fine for a quick one-liner, wrong for real work.
+
 ### `-c` is the flag that matters
 
 Without it, the expander is guessing at your project layout, and it guesses
