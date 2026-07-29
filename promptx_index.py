@@ -506,6 +506,14 @@ def compare(root, cache_dir, with_tests=True):
     }
 
 
+def _sans_timing(summary):
+    """Test summaries embed wall-clock ("21 passed in 4.91s") which varies
+    every run, so raw string equality NEVER matches on a suite with nonzero
+    runtime — discovered because the first unit test hand-crafted identical
+    strings and thereby tested the branch, not the reality."""
+    return re.sub(r"\s+in\s+[\d.]+\s*s\b", "", summary or "")
+
+
 def format_report(rep):
     """Human-readable, and honest about what it cannot know."""
     if rep.get("error"):
@@ -562,7 +570,7 @@ def format_report(rep):
             elif tb["returncode"] == 0 and ta["returncode"] != 0:
                 L.append("  -> WAS PASSING, NOW FAILING")
             elif (tb["returncode"] == 0 and ta["returncode"] == 0
-                  and tb["summary"] == ta["summary"]):
+                  and _sans_timing(tb["summary"]) == _sans_timing(ta["summary"])):
                 # Green before, green after, same counts: this suite cannot
                 # tell work from no-work. The diff says the files changed;
                 # nothing observable says the change DOES anything. An agent
@@ -686,7 +694,9 @@ def has_verification(text):
 # rest, but these four never need one — and unlike a model, they cannot be
 # talked out of it by a plausible-sounding step.
 
-_CREATE_RE = re.compile(r"\bcreate\b[^`\n]{0,80}`([^`\n]{2,120})`", re.I)
+_CREATE_RE = re.compile(
+    r"(?:\b(?:create|generate)\b[^`\n]{0,80}|\b(?:add|write|make)\b[^`\n]{0,40}\bnew\s+(?:file|module|script)\b[^`\n]{0,40}|\b(?:file|module|script)\s+(?:called|named)\s*)"
+    r"`([^`\n]{2,120})`", re.I)
 _STEP_RE = re.compile(r"^\s{0,3}(?:step\s+)?(\d{1,2})[.):]\s", re.I | re.M)
 
 
@@ -737,6 +747,14 @@ def lint_plan(text, index):
     # check 3: paths that neither exist nor are created by any step
     mentioned = set()
     for m in re.finditer(r"`([^`\n]{2,120})`", text):
+        # A path mentioned only to say "leave it alone" is not a plan step.
+        # Rule 5 makes every spec carry a Do-NOT section, so without this the
+        # phantom check false-positives on nearly every work order that
+        # forbids touching a gitignored or absent file.
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        line = text[line_start:text.find("\n", m.start()) if text.find("\n", m.start()) != -1 else len(text)]
+        if re.search(r"\bdo\s+not\b|\bdon'?t\b|\bnever\b|\bavoid\b|\bleave\b", line, re.I):
+            continue
         tok = m.group(1).strip().lstrip("./")
         if "/" in tok and re.search(r"\.\w{1,5}$", tok):
             mentioned.add(tok)

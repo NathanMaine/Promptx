@@ -197,6 +197,37 @@ the check that proves it took: `grep '^docker:' /etc/group`.
 
 ---
 
+### 10. Three defects found by adversarial self-review, hours after shipping
+**Found:** 2026-07-29 · **Fixed:** same day
+
+An analysis pass over the day's own solutions — generate verification
+questions designed to expose errors, then answer each by running code —
+found three real defects in features shipped that morning:
+
+**INDISCRIMINATE detection was dead code.** It compared test summaries by
+string equality, but pytest summaries embed wall-clock: `21 passed in 4.91s`
+vs `in 0.26s` never match, so the branch could not fire on any suite with
+nonzero runtime. The unit test had passed because it used hand-crafted
+identical strings — **it verified the branch, not the reality.** Fixed by
+stripping timing before comparison; retested with real varying timings.
+
+**The phantom-path check false-positived on every Do-NOT section.** "Do not
+touch `config/secrets.env`" flagged the path as invented. Systematic, not
+occasional: rule 5 requires a Do-NOT section in every spec. Fixed by
+excluding negated lines; a genuine phantom on the next line still fires.
+
+**The create-check matched one verb.** "Create `x`" was caught; "Add a new
+file `x`", "Generate `x`", "file named `x`" were all missed. Broadened with
+care — bare "add"/"write" must NOT match, or "Add a function to
+`existing.py`" becomes a false positive. Eight-case table verified, both
+directions.
+
+**Lesson.** The unit-test trap was the meta-error: passing a synthetic input
+proves the code path exists, not that reality ever takes it. Test with the
+real thing — the same principle --check itself is built on.
+
+---
+
 ## OPEN
 
 ### ~~A. Nothing checks whether the plan is sound~~ — MOSTLY SOLVED
