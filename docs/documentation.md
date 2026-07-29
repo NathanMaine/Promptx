@@ -29,6 +29,9 @@ promptx [-c DIR] [-x] [-m MODEL] [--local] [--copy] [--raw] [--models] REQUEST..
 | `--copy` | Copy the result to the clipboard via `pbcopy` (macOS). |
 | `--raw` | Print the work order with no header or separators. Good for piping. |
 | `--models` | Print the suggested-model table and exit. |
+| `--scan` | Build/refresh the structural index for `-c DIR`. Incremental. |
+| `--push` | Also upload that index to the hosted instance (`PROMPTX_HOSTED_URL`). |
+| `--folders` | List indexed folders, with file counts and scan times. |
 
 ### Which install sees which filesystem
 
@@ -170,6 +173,71 @@ an arbitrary directory listing of your NAS, so keep it.
 
 ---
 
+## The structural index
+
+Filenames alone cannot support a question about what the code *says*. A good
+model will refuse those outright — correctly. The index removes that limit
+without sending source.
+
+### What it stores
+
+Per file, from `promptx_index.py`:
+
+| Kind | Extracted |
+|---|---|
+| Python | imports, class and function signatures (via `ast`, so they are real), first docstring line, module-level `UPPER_CASE` constants |
+| JS / TS | imports and requires, exported functions, classes, arrow consts |
+| Markdown / rst / txt | heading outline, first line of body, word count |
+| Go, Rust, Java, C, Ruby, … | top-level `func` / `fn` / `class` / `struct` / `type` declarations |
+| JSON / YAML / TOML / ini | **top-level key names only — never values**, because those hold secrets |
+| anything else | path and size |
+
+Roughly 50 tokens per file against ~4,000 for full source. A 14-file project
+renders to about 1,700 tokens; the render is capped at 60,000 characters
+(~15K tokens) and 400 files, with documentation emitted before code so doc
+outlines survive truncation.
+
+### Caching and refresh
+
+One JSON file per indexed folder, named by a hash of its absolute path:
+
+- CLI and local UI: `~/.promptx/index/`
+- Hosted server: `/app/.index/` (override with `PROMPTX_INDEX_DIR`)
+
+Refresh is incremental. A file whose size **and** mtime match the cached entry
+is reused untouched, so re-scanning after editing two files parses two files.
+`force=True` on the API (not exposed as a CLI flag) re-parses everything —
+needed only if the extractor itself changed.
+
+### Two prompts, not one
+
+When an index is present, promptx swaps `SYSTEM` for `SYSTEM_DEEP`, which
+**replaces** the "you can see file NAMES but not file CONTENTS" clause rather
+than appending to it. Both at once is a contradiction, and a model given
+contradictory instructions hedges instead of committing.
+
+`SYSTEM_DEEP` keeps a narrower honesty rule: it may say which files are
+relevant, what is missing, and what is inconsistent between docs and code — but
+it may not assert what a function *body* does beyond what the signature and
+docstring show, and must instruct the agent to read that specific file first.
+
+### Server endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/scan` `{dir, force}` | Index a folder **on the server**. Goes through `safe_root`. |
+| `POST /api/index` `{root, files, …}` | Store an index built elsewhere. See below. |
+| `GET /api/folders` | Pickable folders, each flagged indexed or not. |
+
+`deep_context()` deliberately does **not** go through `safe_root`. An index is
+inert data that was already built; rendering it touches no filesystem. That is
+precisely what lets a laptop push a map for `/Users/you/project` and then expand
+against it from a phone — the server never needs to see those files.
+
+`POST /api/index` has the same trust model as the rest of the hosted server:
+none. Anyone on the LAN can store an index. Payloads over 4 MB are rejected.
+Keep it on the LAN.
+
 ## Configuration
 
 Every setting is an environment variable, and every one has a default.
@@ -183,6 +251,8 @@ Every setting is an environment variable, and every one has a default.
 | `PROMPTX_SPARK_URL` | `server.py` | same as above |
 | `PROMPTX_SPARK_MODEL` | `server.py` | same as above |
 | `PROMPTX_ENV` | `server.py` | `/volume1/Projects/promptx/.env` |
+| `PROMPTX_INDEX_DIR` | all | `~/.promptx/index` locally, `/app/.index` hosted |
+| `PROMPTX_HOSTED_URL` | `main.py` (`--push`) | `http://10.0.4.88:7331` |
 
 Note the naming split: `server.py` uses `SPARK_*` while the other two use
 `LOCAL_*`. Set both if you are configuring a box that runs all three.
@@ -252,10 +322,13 @@ for m in json.load(sys.stdin)["data"]:
 
 ## Limits worth knowing before you rely on it
 
-- **120 files of context.** Large repos get truncated alphabetically.
-- **Names, not contents.** It cannot review code it has never read. The system
-  prompt tells it to say so rather than invent findings, and it mostly complies
-  — but "mostly" is doing work in that sentence.
+- **120 files of context** without `--scan` (400 with it). Large repos get
+  truncated alphabetically; point `-c` at a subdirectory.
+- **Names, not contents — unless you `--scan`.** Without an index it cannot
+  review code it has never read, and the system prompt tells it to say so
+  rather than invent findings. With an index it sees signatures and docstrings,
+  but still not function bodies, so it will name the file to read instead of
+  guessing what the body does.
 - **One interpretation, confidently.** Ambiguity in, a decisive guess out. Read
   before you run.
 - **No auth on the hosted server.** LAN only.

@@ -13,14 +13,22 @@ import json
 import os
 import pathlib
 import socketserver
+import time
 import urllib.error
 import urllib.request
+
+# Optional: without it, promptx still works on filenames alone.
+try:
+    import promptx_index
+except ImportError:
+    promptx_index = None
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 SPARK_URL = os.getenv("PROMPTX_SPARK_URL", "http://10.0.4.93:11434/v1/chat/completions")
 SPARK_MODEL = os.getenv("PROMPTX_SPARK_MODEL", "qwen3.6-uncensored:latest")
 ENV_FILE = pathlib.Path(os.getenv("PROMPTX_ENV", "/volume1/Projects/promptx/.env"))
 PROJECT_ROOTS = ["/volume1/Projects", "/volume1/@home/Natron"]
+INDEX_DIR = pathlib.Path(os.getenv("PROMPTX_INDEX_DIR", "/app/.index"))
 
 # id, label, cost, strength, best-for
 MODELS = [
@@ -83,6 +91,29 @@ report what it actually finds.
 
 If the request is already specific, tighten it rather than inflating it."""
 
+# Used when the folder has been indexed. The honesty clause above exists
+# because filenames alone cannot support an audit; with a structural map that
+# constraint genuinely relaxes, so repeating it would make the model refuse
+# work it is now equipped to do.
+SYSTEM_DEEP = SYSTEM.replace(
+    """IMPORTANT: You can see file NAMES but not file CONTENTS. If the task requires \
+reading code to answer (an audit, a review, "what does X do"), do NOT invent \
+findings. Instead instruct the agent to read the relevant files first and \
+report what it actually finds.""",
+    """You have been given a STRUCTURAL MAP of the project: for each file, its \
+imports, class and function signatures, and docstrings; for each document, its \
+heading outline. You can see what exists and what each piece is for.
+
+You do NOT have the full source. So:
+- You MAY state which files are relevant, what is missing, what is inconsistent \
+between docs and code, and what a change must touch.
+- You MAY NOT assert what a function body does beyond what its name, signature, \
+and docstring show. Where the task depends on the implementation, instruct the \
+agent to read that specific file first — naming it exactly.
+- For documentation tasks, compare the heading outlines against the code \
+structure and name the concrete gaps: sections that describe code that no \
+longer exists, and code with no documentation covering it.""")
+
 
 def api_key():
     k = os.getenv("OPENROUTER_API_KEY")
@@ -137,15 +168,43 @@ def repo_context(root, max_files=150):
     return ("\n".join(out) if out else "(empty)"), None
 
 
+def deep_context(ctx_dir):
+    """Rendered structural map for a folder, if one has been indexed.
+
+    Deliberately does NOT go through safe_root. An index is inert data that was
+    already built and stored; rendering it touches no filesystem. That is what
+    lets a laptop push an index for /Users/you/project and then expand against
+    it from a phone — the NAS never needs to see those files, only the map.
+
+    Returns None when there is no index, and the caller falls back to a plain
+    filename listing (which does go through safe_root, because it reads disk).
+    """
+    if promptx_index is None or not ctx_dir:
+        return None
+    idx = promptx_index.load_index(ctx_dir, INDEX_DIR)
+    if not idx or not idx.get("files"):
+        return None
+    return promptx_index.render(idx)
+
+
 def expand(request, model, ctx_dir):
-    ctx = None
+    ctx, deep = None, None
     if ctx_dir and ctx_dir.strip():
-        ctx, err = repo_context(ctx_dir.strip())
-        if err:
-            return None, err
+        ctx_dir = ctx_dir.strip()
+        deep = deep_context(ctx_dir)
+        if deep is None:
+            ctx, err = repo_context(ctx_dir)
+            if err:
+                return None, err
 
     user = request
-    if ctx:
+    if deep:
+        user = (f"{deep}\n\nRequest: {request}\n\n"
+                f"Use the ACTUAL paths above. Where the request depends on code "
+                f"you cannot see the body of, instruct the agent to read that "
+                f"specific file first. If something the request depends on is "
+                f"missing entirely, say so and instruct the agent to create it.")
+    elif ctx:
         user = (f"Project structure:\n```\n{ctx}\n```\n\nRequest: {request}\n\n"
                 f"Use the ACTUAL paths above. If something the request depends on "
                 f"is missing from the tree, say so explicitly and instruct the "
@@ -153,7 +212,7 @@ def expand(request, model, ctx_dir):
 
     local = model == "__local__"
     payload = {"model": SPARK_MODEL if local else model,
-               "messages": [{"role": "system", "content": SYSTEM},
+               "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                             {"role": "user", "content": user}],
                "temperature": 0.3, "max_tokens": 900}
     headers = {"Content-Type": "application/json"}
@@ -190,6 +249,107 @@ def expand(request, model, ctx_dir):
     return text.strip(), None
 
 
+def do_scan(ctx_dir, force=False):
+    """Build or refresh the structural index for one folder."""
+    if promptx_index is None:
+        return {"error": "promptx_index.py is not installed next to server.py"}
+    if not ctx_dir or not ctx_dir.strip():
+        return {"error": "no folder given"}
+    rp = safe_root(ctx_dir.strip())
+    if rp is None:
+        return {"error": f"path must be under {' or '.join(PROJECT_ROOTS)}"}
+    if not rp.is_dir():
+        return {"error": f"not a directory: {rp}"}
+
+    started = time.time()
+    try:
+        idx = promptx_index.scan(rp, INDEX_DIR, force=force)
+    except (OSError, ValueError) as e:
+        return {"error": f"scan failed: {e}"}
+
+    return {"ok": True, "root": str(rp),
+            "file_count": idx["file_count"], "parsed": idx["parsed"],
+            "reused": idx["reused"], "truncated": idx["truncated"],
+            "scanned_at": idx["scanned_at"],
+            "seconds": round(time.time() - started, 1)}
+
+
+def store_index(payload):
+    """Accept an index built on another machine and cache it here.
+
+    This is what makes the hosted UI useful for projects that live on a laptop
+    rather than on this box: `promptx --push <folder>` scans locally, where the
+    files actually are, and uploads only the structural map. Expansion then
+    works from any device, including ones that cannot see those files at all.
+
+    Only the map is transmitted — signatures, docstrings, and headings. No file
+    bodies, and no config values (the indexer records key names only).
+    """
+    if promptx_index is None:
+        return {"error": "promptx_index.py is not installed next to server.py"}
+    root = (payload.get("root") or "").strip()
+    files = payload.get("files")
+    if not root or not isinstance(files, dict):
+        return {"error": "need root and files"}
+    if len(json.dumps(files)) > 4_000_000:
+        return {"error": "index too large (>4MB)"}
+
+    index = {"root": root,
+             "scanned_at": int(payload.get("scanned_at") or time.time()),
+             "file_count": len(files),
+             "parsed": int(payload.get("parsed") or 0),
+             "reused": int(payload.get("reused") or 0),
+             "truncated": bool(payload.get("truncated")),
+             "remote": True,
+             "files": files}
+    try:
+        p = promptx_index.cache_path(root, INDEX_DIR)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(index), encoding="utf-8")
+    except OSError as e:
+        return {"error": f"could not store index: {e}"}
+    return {"ok": True, "root": root, "file_count": len(files)}
+
+
+def list_folders():
+    """Folders you can pick, each tagged with whether it has been indexed.
+
+    Combines the immediate subdirectories of every project root with anything
+    already in the index cache, so switching between projects is a dropdown
+    rather than remembering absolute paths.
+    """
+    indexed = {}
+    if promptx_index is not None:
+        for row in promptx_index.list_indexed(INDEX_DIR):
+            indexed[row["root"]] = row
+
+    found = []
+    for root in PROJECT_ROOTS:
+        rp = pathlib.Path(root)
+        if not rp.is_dir():
+            continue
+        try:
+            for child in sorted(rp.iterdir()):
+                if child.is_dir() and not child.name.startswith((".", "@", "#")):
+                    found.append(str(child))
+        except OSError:
+            continue
+
+    for path in indexed:
+        if path not in found:
+            found.append(path)
+
+    out = []
+    for path in sorted(set(found)):
+        row = indexed.get(path)
+        out.append({"path": path,
+                    "indexed": bool(row),
+                    "file_count": row["file_count"] if row else 0,
+                    "scanned_at": row["scanned_at"] if row else 0})
+    # indexed folders first — those are the ones being actively worked on
+    return sorted(out, key=lambda r: (not r["indexed"], -r["scanned_at"], r["path"]))
+
+
 PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>promptx — Prompt Expander</title><style>
@@ -223,6 +383,10 @@ button{border:0;border-radius:10px;padding:10px 18px;font:inherit;font-weight:65
 button:disabled{opacity:.5;cursor:default}
 button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .hint{color:var(--muted);font-size:12.5px;margin-top:10px}
+.ixrow{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.ixstat{font-size:12.5px;color:var(--muted)}
+.ixstat.on{color:#16a34a}
+.ixstat.err{color:#dc2626}
 .mbox{background:var(--chip);border:1px solid var(--line);border-radius:10px;
   padding:12px 14px;margin-top:12px}
 .mhead{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
@@ -256,11 +420,17 @@ footer{color:var(--muted);font-size:12.5px;margin-top:34px;border-top:1px solid 
 <div class="card">
   <textarea id="q" placeholder="What do you want done?&#10;e.g. build out the gtm adapters package" autofocus></textarea>
   <div class="row">
-    <input type="text" id="dir" placeholder="Project folder (optional) — e.g. /volume1/Projects/my-app">
+    <input type="text" id="dir" list="folders" placeholder="Project folder (optional) — e.g. /volume1/Projects/my-app">
+    <datalist id="folders"></datalist>
     <select id="model"></select>
     <button id="go">Expand</button>
   </div>
-  <div class="hint">⌘↵ / Ctrl↵ to submit · adding a folder lets it name real file paths instead of guessing</div>
+  <div class="ixrow">
+    <button class="ghost" id="scan">Scan folder</button>
+    <button class="ghost" id="refresh" hidden>Refresh</button>
+    <span class="ixstat" id="ixstat"></span>
+  </div>
+  <div class="hint">⌘↵ / Ctrl↵ to submit · a folder lets it name real paths · <b>Scan</b> reads the code structure so it can answer questions about what is already there</div>
   <div class="mbox" id="mbox"></div>
 </div>
 
@@ -290,6 +460,54 @@ MODELS.forEach(m=>{const o=document.createElement('option');o.value=m[0];
   o.textContent=`${m[1]} · ${m[2]}`;$('model').appendChild(o)});
 $('dir').value=localStorage.getItem('px_dir')||'';
 $('model').value=localStorage.getItem('px_model')||MODELS[0][0];
+
+/* ---- project folders and the structural index ---- */
+let FOLDERS=[];
+function fmtAge(ts){if(!ts)return'';const s=Math.floor(Date.now()/1000)-ts;
+  if(s<90)return'just now';if(s<5400)return Math.round(s/60)+'m ago';
+  if(s<172800)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago'}
+function curFolder(){return FOLDERS.find(f=>f.path===$('dir').value.trim())}
+function drawIx(){
+  const d=$('dir').value.trim(),f=curFolder(),s=$('ixstat');
+  if(!d){s.textContent='';s.className='ixstat';
+    $('scan').hidden=false;$('refresh').hidden=true;return}
+  if(f&&f.indexed){
+    s.textContent='indexed · '+f.file_count+' files · '+fmtAge(f.scanned_at);
+    s.className='ixstat on';$('scan').hidden=true;$('refresh').hidden=false}
+  else{s.textContent='not indexed — it can see file names only';
+    s.className='ixstat';$('scan').hidden=false;$('refresh').hidden=true}}
+async function loadFolders(){
+  try{const r=await fetch('/api/folders');FOLDERS=(await r.json()).folders||[]}
+  catch(e){FOLDERS=[]}
+  const dl=$('folders');dl.innerHTML='';
+  FOLDERS.forEach(f=>{const o=document.createElement('option');o.value=f.path;
+    if(f.indexed)o.label='indexed · '+f.file_count+' files';dl.appendChild(o)});
+  drawIx()}
+async function doScan(force){
+  const d=$('dir').value.trim();
+  if(!d){$('ixstat').textContent='pick a project folder first';
+    $('ixstat').className='ixstat err';return}
+  const b=force?$('refresh'):$('scan'),label=b.textContent;
+  b.disabled=true;b.textContent='Reading…';
+  $('ixstat').textContent='reading file structure…';$('ixstat').className='ixstat';
+  try{
+    const r=await fetch('/api/scan',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dir:d,force:!!force})});
+    const j=await r.json();
+    if(j.error){$('ixstat').textContent=j.error;$('ixstat').className='ixstat err'}
+    else{await loadFolders();
+      $('ixstat').textContent='indexed '+j.file_count+' files in '+j.seconds+'s'+
+        (j.reused?' ('+j.parsed+' read, '+j.reused+' unchanged)':'')+
+        (j.truncated?' · truncated':'');
+      $('ixstat').className='ixstat on'}}
+  catch(e){$('ixstat').textContent='scan failed';$('ixstat').className='ixstat err'}
+  b.disabled=false;b.textContent=label}
+$('scan').onclick=()=>doScan(false);
+$('refresh').onclick=()=>doScan(false);
+$('dir').addEventListener('input',drawIx);
+$('dir').addEventListener('change',drawIx);
+loadFolders();
 
 function drawModel(){
   const m=MODELS.find(x=>x[0]===$('model').value)||MODELS[0];
@@ -341,7 +559,13 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path.split("?")[0] not in ("/", "/index.html"):
+        route = self.path.split("?")[0]
+
+        if route == "/api/folders":
+            self._j({"folders": list_folders()})
+            return
+
+        if route not in ("/", "/index.html"):
             self.send_error(404)
             return
         body = PAGE.replace("__MODELS__", json.dumps(MODELS)).encode()
@@ -352,17 +576,29 @@ class H(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != "/api/expand":
-            self.send_error(404)
-            return
         try:
             n = int(self.headers.get("Content-Length", 0))
             p = json.loads(self.rfile.read(n))
         except (ValueError, json.JSONDecodeError):
             self._j({"error": "bad request"})
             return
-        text, err = expand(p.get("request", ""), p.get("model", MODELS[0][0]), p.get("dir", ""))
-        self._j({"error": err} if err else {"text": text})
+
+        if self.path == "/api/expand":
+            text, err = expand(p.get("request", ""),
+                               p.get("model", MODELS[0][0]),
+                               p.get("dir", ""))
+            self._j({"error": err} if err else {"text": text})
+            return
+
+        if self.path == "/api/scan":
+            self._j(do_scan(p.get("dir", ""), bool(p.get("force"))))
+            return
+
+        if self.path == "/api/index":
+            self._j(store_index(p))
+            return
+
+        self.send_error(404)
 
     def _j(self, o):
         b = json.dumps(o).encode()

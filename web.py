@@ -23,6 +23,14 @@ import webbrowser
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 LOCAL_URL = os.getenv("PROMPTX_LOCAL_URL", "http://10.0.4.93:11434/v1/chat/completions")
 LOCAL_MODEL = os.getenv("PROMPTX_LOCAL_MODEL", "qwen3.6-uncensored:latest")
+INDEX_DIR = pathlib.Path(os.getenv("PROMPTX_INDEX_DIR",
+                                   str(pathlib.Path.home() / ".promptx/index")))
+
+# Optional; without it the UI works on filenames alone.
+try:
+    import promptx_index
+except ImportError:
+    promptx_index = None
 
 MODELS = [
     ("google/gemini-2.5-flash-lite", "Gemini Flash Lite — fast, cheap (default)"),
@@ -60,6 +68,27 @@ findings. Instead instruct the agent to read the relevant files first and \
 report what it actually finds.
 
 If the request is already specific, tighten it rather than inflating it."""
+
+# Replaces the names-only clause rather than appending to it — the two would
+# contradict each other, and a model told both things at once will hedge.
+SYSTEM_DEEP = SYSTEM.replace(
+    """IMPORTANT: You can see file NAMES but not file CONTENTS. If the task requires \
+reading code to answer (an audit, a review, "what does X do"), do NOT invent \
+findings. Instead instruct the agent to read the relevant files first and \
+report what it actually finds.""",
+    """You have been given a STRUCTURAL MAP of the project: per file, its imports, \
+class and function signatures, and docstrings; per document, its heading outline. \
+You can see what exists and what each piece is for.
+
+You do NOT have the full source. So:
+- You MAY state which files are relevant, what is missing, what is inconsistent \
+between docs and code, and what a change must touch.
+- You MAY NOT assert what a function body does beyond what its name, signature, \
+and docstring show. Where the task depends on the implementation, instruct the \
+agent to read that specific file first — naming it exactly.
+- For documentation tasks, compare the heading outlines against the code \
+structure and name concrete gaps: docs describing code that no longer exists, \
+and code with no documentation covering it.""")
 
 
 def api_key():
@@ -101,15 +130,38 @@ def repo_context(root, max_files=150):
     return ("\n".join(out) if out else "(empty)"), None
 
 
+def deep_context(root):
+    """Structural map for a folder, if `promptx -c DIR --scan` has built one.
+
+    This UI has no Scan button — scanning is a CLI action. If an index exists it
+    is used automatically, so the two tools stay in sync.
+    """
+    if promptx_index is None or not root:
+        return None
+    idx = promptx_index.load_index(root, INDEX_DIR)
+    if not idx or not idx.get("files"):
+        return None
+    return promptx_index.render(idx)
+
+
 def expand(request, model, ctx_dir):
-    ctx, err = (None, None)
+    ctx, err, deep = (None, None, None)
     if ctx_dir and ctx_dir.strip():
-        ctx, err = repo_context(ctx_dir.strip())
-        if err:
-            return None, err
+        ctx_dir = ctx_dir.strip()
+        deep = deep_context(ctx_dir)
+        if deep is None:
+            ctx, err = repo_context(ctx_dir)
+            if err:
+                return None, err
 
     user = request
-    if ctx:
+    if deep:
+        user = (f"{deep}\n\nRequest: {request}\n\n"
+                f"Use the ACTUAL paths above. Where the request depends on code "
+                f"whose body you cannot see, instruct the agent to read that "
+                f"specific file first. If something it depends on is missing "
+                f"entirely, say so and instruct the agent to create it.")
+    elif ctx:
         user = (f"Project structure:\n```\n{ctx}\n```\n\nRequest: {request}\n\n"
                 f"Use the ACTUAL paths above. If something the request depends on "
                 f"is missing from the tree, say so explicitly and instruct the "
@@ -118,7 +170,7 @@ def expand(request, model, ctx_dir):
     local = model == "__local__"
     payload = {
         "model": LOCAL_MODEL if local else model,
-        "messages": [{"role": "system", "content": SYSTEM},
+        "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                      {"role": "user", "content": user}],
         "temperature": 0.3, "max_tokens": 900,
     }

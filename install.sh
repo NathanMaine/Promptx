@@ -25,8 +25,12 @@ echo "==> installing to $DEST"
 mkdir -p "$DEST"
 install -m 755 "$SRC/main.py" "$DEST/promptx"
 install -m 755 "$SRC/web.py"  "$DEST/promptx-web"
+# Imported by both. Must sit next to them — Python looks in the script's own
+# directory first, which is how the CLI finds it without a package install.
+install -m 644 "$SRC/promptx_index.py" "$DEST/promptx_index.py"
 echo "    promptx"
 echo "    promptx-web"
+echo "    promptx_index.py  (structural indexing — enables --scan)"
 
 # ~/bin on PATH?
 case ":$PATH:" in

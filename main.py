@@ -37,10 +37,20 @@ import sys
 import urllib.error
 import urllib.request
 
+# Sits next to this script in ~/bin. Without it, promptx still works on
+# filenames alone — you just lose --scan.
+try:
+    import promptx_index
+except ImportError:
+    promptx_index = None
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("PROMPTX_MODEL", "google/gemini-2.5-flash-lite")
 LOCAL_URL = os.getenv("PROMPTX_LOCAL_URL", "http://10.0.4.93:11434/v1/chat/completions")
 LOCAL_MODEL = os.getenv("PROMPTX_LOCAL_MODEL", "qwen3.6-uncensored:latest")
+INDEX_DIR = pathlib.Path(os.getenv("PROMPTX_INDEX_DIR",
+                                   str(pathlib.Path.home() / ".promptx/index")))
+HOSTED_URL = os.getenv("PROMPTX_HOSTED_URL", "http://10.0.4.88:7331")
 
 SUGGESTED = [
     ("google/gemini-2.5-flash-lite", "$0.10/M — fast, clean output. Default."),
@@ -73,6 +83,23 @@ import them.
 what you did. Do not explain your process. Begin directly with the first step.
 
 If the request is already specific, tighten it rather than inflating it."""
+
+# Used when --scan has built a structural map. Without it, the model only sees
+# filenames and correctly refuses anything that depends on what the code says.
+SYSTEM_DEEP = SYSTEM + """
+
+You have also been given a STRUCTURAL MAP of the project: per file, its imports,
+class and function signatures, and docstrings; per document, its heading outline.
+
+You do NOT have the full source. So:
+- You MAY state which files are relevant, what is missing, what is inconsistent
+  between docs and code, and what a change must touch.
+- You MAY NOT assert what a function body does beyond what its name, signature,
+  and docstring show. Where the task depends on the implementation, instruct the
+  agent to read that specific file first — naming it exactly.
+- For documentation tasks, compare the heading outlines against the code
+  structure and name concrete gaps: docs describing code that no longer exists,
+  and code with no documentation covering it."""
 
 
 def api_key():
@@ -114,9 +141,61 @@ def repo_context(root, max_files=120):
     return "\n".join(out) if out else "(empty directory)"
 
 
-def expand(request, model, context=None, local=False, timeout=180):
+def deep_context(root):
+    """Rendered structural map for a folder, if it has been scanned."""
+    if promptx_index is None or not root:
+        return None
+    idx = promptx_index.load_index(root, INDEX_DIR)
+    if not idx or not idx.get("files"):
+        return None
+    return promptx_index.render(idx)
+
+
+def do_scan_cli(root, push=False):
+    """Scan a folder, and optionally publish the map to the hosted instance.
+
+    Scanning happens here, on the machine that can actually see the files. Only
+    the resulting map travels — which is what makes a laptop project usable from
+    the hosted UI on a phone.
+    """
+    root = str(pathlib.Path(root).expanduser().resolve())
+    print(f"scanning {root} ...")
+    try:
+        idx = promptx_index.scan(root, INDEX_DIR)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"promptx: {exc}")
+
+    print(f"  {idx['file_count']} files  ({idx['parsed']} read, "
+          f"{idx['reused']} unchanged){'  [truncated]' if idx['truncated'] else ''}")
+    rendered = promptx_index.render(idx)
+    print(f"  map is ~{len(rendered) // 4} tokens")
+
+    if push:
+        body = json.dumps(idx).encode()
+        url = HOSTED_URL.rstrip("/") + "/api/index"
+        req = urllib.request.Request(url, body, {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                res = json.loads(r.read())
+        except (urllib.error.URLError, OSError) as exc:
+            raise SystemExit(f"promptx: could not reach {url}: {exc}")
+        if res.get("error"):
+            raise SystemExit(f"promptx: push rejected: {res['error']}")
+        print(f"  pushed to {HOSTED_URL} — pick this folder there to use it")
+
+    print(f"\nnow:  promptx -c {root} \"your request\"")
+    return 0
+
+
+def expand(request, model, context=None, local=False, timeout=180, deep=None):
     user = request
-    if context:
+    if deep:
+        user = (f"{deep}\n\nRequest: {request}\n\n"
+                f"Use the ACTUAL paths above. Where the request depends on code "
+                f"whose body you cannot see, instruct the agent to read that "
+                f"specific file first. If something it depends on is missing "
+                f"entirely, say so and instruct the agent to create it.")
+    elif context:
         user = (f"Project structure:\n```\n{context}\n```\n\n"
                 f"Request: {request}\n\n"
                 f"Use the ACTUAL paths above. If something the request depends on "
@@ -125,7 +204,7 @@ def expand(request, model, context=None, local=False, timeout=180):
 
     payload = {
         "model": LOCAL_MODEL if local else model,
-        "messages": [{"role": "system", "content": SYSTEM},
+        "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                      {"role": "user", "content": user}],
         "temperature": 0.3,
         "max_tokens": 900,
@@ -176,7 +255,36 @@ def main():
     ap.add_argument("--copy", action="store_true", help="copy result to clipboard")
     ap.add_argument("--raw", action="store_true", help="no header, just the prompt")
     ap.add_argument("--models", action="store_true", help="show suggested models")
+    ap.add_argument("--scan", action="store_true",
+                    help="index -c DIR so it can answer questions about the code, "
+                         "not just name paths (incremental: only changed files)")
+    ap.add_argument("--push", action="store_true",
+                    help="upload the index to the hosted promptx so other devices "
+                         f"can use it (default {HOSTED_URL})")
+    ap.add_argument("--folders", action="store_true", help="list indexed folders")
     args = ap.parse_args()
+
+    if args.folders:
+        if promptx_index is None:
+            raise SystemExit("promptx: promptx_index.py is not installed next to promptx")
+        rows = promptx_index.list_indexed(INDEX_DIR)
+        if not rows:
+            print("\n  no folders indexed yet — run:  promptx -c . --scan\n")
+            return 0
+        print("\nIndexed folders:\n")
+        for r in rows:
+            import time as _t
+            when = _t.strftime("%Y-%m-%d %H:%M", _t.localtime(r["scanned_at"]))
+            print(f"  {r['file_count']:>5} files  {when}  {r['root']}")
+        print()
+        return 0
+
+    if args.scan or args.push:
+        if promptx_index is None:
+            raise SystemExit("promptx: promptx_index.py is not installed next to promptx")
+        if not args.context:
+            raise SystemExit("promptx: --scan needs a folder, e.g.  promptx -c . --scan")
+        return do_scan_cli(args.context, push=args.push)
 
     if args.models:
         print("\nSuggested expander models (one short call — cheap and fast wins):\n")
@@ -189,8 +297,9 @@ def main():
     if not args.request:
         ap.error("give me a request, or use --models")
 
-    ctx = repo_context(args.context) if args.context else None
-    result = expand(" ".join(args.request), args.model, ctx, args.local)
+    deep = deep_context(args.context) if args.context else None
+    ctx = None if deep else (repo_context(args.context) if args.context else None)
+    result = expand(" ".join(args.request), args.model, ctx, args.local, deep=deep)
 
     if args.raw or args.exec:
         print(result)

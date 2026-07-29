@@ -104,6 +104,51 @@ phone, your laptop, anywhere on the LAN. See
 
 ---
 
+## Give it real context: `--scan`
+
+By default promptx sees **file names only**. That is enough to build things, but
+a good model will correctly *refuse* anything that depends on what the code
+actually says:
+
+> *"I cannot write this work order. 'Update all documentation' requires me to
+> read the actual content of existing docs and code to know what is outdated. I
+> cannot see file contents — only names."*
+
+That refusal is right, and `--scan` fixes it:
+
+```bash
+promptx -c . --scan          # build the map (incremental — only changed files)
+promptx -c . "update all documentation for this project"
+```
+
+Now the same request produces a file-by-file work order that names real
+functions and real gaps.
+
+**It sends structure, not source.** Per file: imports, class and function
+signatures, and docstrings. Per document: the heading outline. That is ~50
+tokens per file instead of ~4,000, so a whole project fits in a few thousand
+tokens. Full contents would blow past any context window and cost real money on
+every call.
+
+The map is cached as JSON under `~/.promptx/index/`. Re-running `--scan` after
+editing two files re-reads two files — everything else is matched by size and
+mtime and reused.
+
+```bash
+promptx --folders            # what's indexed, how many files, how long ago
+promptx -c . --scan --push   # also upload the map to the hosted instance
+```
+
+### `--push`, for projects that live on your laptop
+
+The hosted copy on a NAS cannot see `/Users/you/myproject`. `--push` scans
+locally — where the files are — and uploads **only the map**. The hosted UI then
+lists that folder and can expand against it from any device, including ones that
+have no access to those files at all.
+
+What travels: signatures, docstrings, headings, and config *key names*. Not file
+bodies, and not config values.
+
 ## When to use it, and when not to
 
 **Use it for BUILD tasks.** Creating files, adding features, refactoring —
