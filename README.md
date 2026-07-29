@@ -232,3 +232,13 @@ you catch in an hour.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Found a bug?
+
+Open an issue — the [bug template](.github/ISSUE_TEMPLATE/bug_report.md) asks
+for the two things that matter most: the work order verbatim, and whether the
+folder was indexed.
+
+[docs/FIELD-NOTES.md](docs/FIELD-NOTES.md) lists every bug found so far with its
+diagnosis, plus the problems still open. Worth a look before filing — and the
+open ones are the best place to contribute.
