@@ -1,0 +1,53 @@
+# Keeps the hosted promptx UI running across reboots.
+#
+# Without this, server.py runs under nohup and dies the next time the box
+# restarts — silently, and you find out weeks later when the bookmark 404s.
+#
+# Install:
+#   sudo cp systemd/promptx.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now promptx
+#   systemctl status promptx
+#
+# Adjust User, WorkingDirectory, and ExecStart for your box. The paths below
+# are for a UGREEN/Synology-style NAS where shares live under /volume1.
+
+[Unit]
+Description=promptx — prompt expander web UI
+Documentation=https://github.com/NathanMaine/promptx
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=Natron
+Group=users
+WorkingDirectory=/volume1/Projects/promptx
+ExecStart=/usr/bin/python3 /volume1/Projects/promptx/server.py --port 7331 --host 0.0.0.0
+
+# The API key. Prefer EnvironmentFile so the key is not in this unit —
+# /etc/promptx.env should be chmod 600 and owned by root.
+EnvironmentFile=-/etc/promptx.env
+Environment=PROMPTX_ENV=/volume1/Projects/promptx/.env
+Environment=PYTHONUNBUFFERED=1
+
+Restart=always
+RestartSec=5
+
+# Don't spin forever if it's crash-looping on a bad config
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=promptx
+
+# Modest hardening — it only needs to read its own directory and talk HTTPS
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/volume1/Projects/promptx
+
+[Install]
+WantedBy=multi-user.target

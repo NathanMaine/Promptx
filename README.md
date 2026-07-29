@@ -1,0 +1,179 @@
+# promptx
+
+**Turns a vague request into an explicit work order, so local coding models
+execute instead of guessing.**
+
+```
+you:      "build out the gtm adapters package"
+
+promptx:  1. Create src/gtm_adapters/gtm_adapter.py — abstract base class
+             GTMAdapter with method process_event(event: dict) -> dict
+          2. Create src/gtm_adapters/strategy_council.py — class
+             StrategyCouncil, method evaluate(genome) -> float
+          3. Create src/gtm_adapters/strategy_genome.py — dataclass
+             StrategyGenome with fields: id, traits, fitness
+          4. ONLY THEN edit src/gtm_adapters/__init__.py to import them
+          5. Verify: python -c "import src.gtm_adapters"
+
+          Do NOT rewrite __init__.py to fix an ImportError. The error names
+          __init__.py but the cause is the missing sibling modules above.
+```
+
+You paste the second thing into your coding agent instead of the first.
+
+---
+
+## Why this exists
+
+A local 80B model was asked to "build out the gtm adapters package." It wrote
+`src/gtm_adapters/__init__.py`, whose imports referenced three sibling modules
+that did not exist. The import failed. The model saw an error naming
+`__init__.py`, so it rewrote `__init__.py`. Same failure. It did this **ten
+times** before it got killed.
+
+The model wasn't broken. It was **fixing the file the error named instead of
+creating the files that were missing** — a diagnostic step smaller models
+frequently get wrong.
+
+The lesson generalizes: local models follow explicit instructions well and
+infer badly. Ambiguity is what makes them loop.
+
+So split the job. A cheap fast cloud model (~$0.10 per million tokens) converts
+your intent into a precise spec. Your local model — excellent at execution,
+weak at inference — runs it. Neither is good at both, and the pairing costs a
+fraction of a cent per request.
+
+---
+
+## Install
+
+```bash
+git clone https://github.com/NathanMaine/promptx.git
+cd promptx
+./install.sh
+```
+
+That puts `promptx` and `promptx-web` in `~/bin` and makes sure `~/bin` is on
+your `PATH`.
+
+**API key.** promptx reads `OPENROUTER_API_KEY` from the environment, and falls
+back to OpenCode's auth store at `~/.local/share/opencode/auth.json` if you
+already use OpenRouter there. Copy `.env.example` to `.env` if you'd rather set
+it explicitly. Get a key at [openrouter.ai](https://openrouter.ai).
+
+No dependencies — Python 3.9+ standard library only, on purpose. It should run
+on a NAS with no pip.
+
+---
+
+## Use it
+
+### Command line
+
+```bash
+promptx -c . --copy "add retry logic to the api client"   # expand, copy to clipboard
+promptx -c . -x "add retry logic to the api client"       # expand, then run via opencode
+promptx -c . "add retry logic to the api client"          # just print it
+promptx --models                                          # list suggested models
+promptx -m anthropic/claude-haiku-4.5 "..."               # pick a different model
+promptx --local "..."                                     # use your own GPU, free
+```
+
+**The `-c .` matters more than anything else here.** It sends the real file
+tree along with your request, so the expander names paths that actually exist
+instead of inventing plausible ones. Without it you get confident fiction.
+
+### Browser
+
+```bash
+promptx-web          # opens http://localhost:7331
+```
+
+A textarea, a project-folder field it remembers between sessions, a model
+picker with descriptions of what each one is good at, and the result with a
+Copy button and a Try again button. It keeps your recent expansions so you can
+compare two phrasings side by side.
+
+### Hosted, so it's on every device
+
+Run `server.py` on a NAS or any always-on box and it's a bookmark from your
+phone, your laptop, anywhere on the LAN. See
+[docs/deployment.md](docs/deployment.md) — it includes a systemd unit, because
+`nohup` does not survive a reboot and you will forget that it was running under
+`nohup`.
+
+---
+
+## When to use it, and when not to
+
+**Use it for BUILD tasks.** Creating files, adding features, refactoring —
+anywhere the agent needs a precise target. This is where the loops happen and
+where the payoff is.
+
+**Skip it for INVESTIGATE tasks.** Audits, code review, "what does this module
+actually do." promptx sees file *names*, not file *contents*, so asked to
+investigate it will confidently invent findings about code it never read. Your
+coding agent can actually open the files. Ask it directly.
+
+**Skip it when you're already specific.** "Fix the typo on line 42 of
+`utils.py`" does not need expanding, and promptx will pad it if you insist.
+
+---
+
+## Which model to use
+
+Default is `google/gemini-2.5-flash-lite` — about $0.10 per million input
+tokens, fast, and it never leaks reasoning traces into the output.
+
+| Model | Cost | What it's good for |
+|---|---|---|
+| `google/gemini-2.5-flash-lite` | $0.10/M | The default. Balanced and clean. |
+| `qwen/qwen3.7-flash` | $0.03/M | Cheapest paid option, 1M context — good for very large project trees. |
+| `meta-llama/llama-3.1-8b-instruct` | $0.05/M | Rigid and literal. Use when you already know exactly what you want. |
+| `inclusionai/ling-3.0-flash:free` | free | Rate limited, but fine for occasional use. |
+| `anthropic/claude-haiku-4.5` | ~$1/M | Catches the things you did *not* say. Worth the money on a gnarly refactor. |
+| `--local` | free | Your own hardware. Verbose, and emits `<think>` traces that get stripped. |
+
+**Avoid reasoning models.** This is one-shot rewriting, not a problem to solve.
+Reasoning models burn tokens thinking about it and leak traces into the output.
+Cheap and literal wins.
+
+Longer comparison in [docs/models.md](docs/models.md).
+
+---
+
+## Read the output before you run it
+
+promptx commits **confidently to one interpretation** of an ambiguous request.
+Asked to "review the platform end to end and make sure there is 100% coverage,"
+it picked *test* coverage and produced a spec for writing a test file. That's a
+defensible reading. It may not have been the intended one.
+
+That is exactly what the Try again button is for. Reword, re-expand, and only
+then paste. A bad spec you catch in ten seconds beats a wrong implementation
+you catch in an hour.
+
+---
+
+## What's in here
+
+| Path | What it is |
+|---|---|
+| [main.py](main.py) | The CLI. Installed as `promptx`. |
+| [web.py](web.py) | Local browser UI. Installed as `promptx-web`. |
+| [server.py](server.py) | The hosted version — multi-user, model descriptions, history. |
+| [install.sh](install.sh) | Installer. |
+| [systemd/promptx.service](systemd/promptx.service) | Keeps `server.py` alive across reboots. |
+| [scripts/add-promptx-tile.sh](scripts/add-promptx-tile.sh) | Adds a promptx tile to a containerized nginx dashboard. |
+| [docs/](docs/) | Full reference, model notes, deployment, prompt design. |
+
+## Docs
+
+- [docs/documentation.md](docs/documentation.md) — complete reference: every flag, every env var, the HTTP API
+- [docs/models.md](docs/models.md) — picking an expander model, and why reasoning models are wrong here
+- [docs/deployment.md](docs/deployment.md) — hosting it on a NAS or server, with systemd
+- [docs/prompt-design.md](docs/prompt-design.md) — why the system prompt says what it says, and what happened when it didn't
+
+## License
+
+MIT — see [LICENSE](LICENSE).
