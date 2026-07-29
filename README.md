@@ -77,6 +77,8 @@ promptx -c . "add retry logic to the api client"          # just print it
 promptx --models                                          # list suggested models
 promptx -m anthropic/claude-haiku-4.5 "..."               # pick a different model
 promptx --local "..."                                     # use your own GPU, free
+promptx -c . --snap "add retry logic"                     # spec + record baseline
+promptx -c . --check                                      # verify what the agent did
 ```
 
 **The `-c .` matters more than anything else here.** It sends the real file
@@ -148,6 +150,35 @@ have no access to those files at all.
 
 What travels: signatures, docstrings, headings, and config *key names*. Not file
 bodies, and not config values.
+
+## Don't trust the agent's report — check it
+
+An agent once told me *"All 6 tests pass"* after running one file with 2 tests
+in it. Another claimed 19/21 for a 23-test suite and listed a file it never
+edited. The fix is not a sterner prompt — a claim cannot be verified by asking
+the claimant more firmly.
+
+`--snap` records the state of your project (content hashes, plus the current
+test result) together with the work order. `--check` looks again afterwards:
+
+```
+SPEC NAMED 2 PATH(S)
+  [changed]   src/calc.py
+  [UNTOUCHED] README.md   <- named in the spec, never changed
+
+UNSPECIFIED (1) - changed but never named in the spec
+  ! tests/test_calc.py
+
+TESTS  (run here, not reported by the agent)
+  before:  1 failed, 1 passed
+  after:   3 passed
+
+FAIL: 1 specified path(s) never changed; 1 unspecified change(s)
+```
+
+The tests are run by promptx, on your machine — the agent's pasted output is
+never consulted. Exit code 1 on any mismatch, so it composes:
+`promptx -c . --check && git commit -am "done"`.
 
 ## When to use it, and when not to
 

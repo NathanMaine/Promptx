@@ -14,6 +14,10 @@ Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 - Browser-side folder scanning in the hosted UI, with real per-file progress.
 - Deterministic verification gate. Derived from the index, not from a model.
 - Pre-commit secret scanner (`scripts/install-hooks.sh`).
+- `--snap` / `--check`: verification by observation. Records content hashes and
+  the test result before the agent works; afterwards reports specified paths
+  never touched, unspecified changes, and the before/after suite result from an
+  independent run. Exit 1 on mismatch. Closes #2 and #3.
 
 ### Fixed
 - Work orders silently truncated at `max_tokens` (900 -> 2400, plus an explicit
