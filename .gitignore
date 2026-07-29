@@ -1,24 +1,65 @@
-# Secrets — never commit these
+# ---------------------------------------------------------------
+# Secrets. Never commit these.
+# ---------------------------------------------------------------
+# .env holds OPENROUTER_API_KEY. .env.example is the safe template and is
+# deliberately re-included below.
 .env
-*.key
-auth.json
+.env.*
+*.env
+!.env.example
 
-# Runtime state written by server.py
+# Credential stores and keys of every shape
+auth.json
+credentials.json
+secrets.json
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.keystore
+.netrc
+.htpasswd
+
+# ---------------------------------------------------------------
+# Runtime state written by the app
+# ---------------------------------------------------------------
+# The structural index. Not secret, but it is per-machine cache and it
+# records the layout of every project you have scanned.
+.index/
+index/
 history.json
 *.log
 *.pid
 
+# ---------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
+.eggs/
 .venv/
 venv/
+env/
 build/
 dist/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Editors / OS
+# ---------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.swo
+*~

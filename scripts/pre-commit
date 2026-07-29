@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Blocks a commit that contains something shaped like a live credential.
+#
+# .gitignore protects files you never add. It does nothing about a key pasted
+# directly into tracked source — which is the likelier accident. This checks
+# the staged diff itself.
+#
+# Install:  bash scripts/install-hooks.sh
+# Bypass:   git commit --no-verify   (only when you are certain)
+
+set -uo pipefail
+
+# Only scan added lines in staged content.
+STAGED=$(git diff --cached --diff-filter=ACM -U0 | grep '^+' | grep -v '^+++' || true)
+[ -z "$STAGED" ] && exit 0
+
+FOUND=0
+report() {
+    if [ "$FOUND" = 0 ]; then
+        echo ""
+        echo "=============================================="
+        echo " COMMIT BLOCKED — possible credential staged"
+        echo "=============================================="
+    fi
+    FOUND=1
+    echo ""
+    echo "  $1"
+    echo "$2" | sed 's/^/    /' | cut -c1-140
+}
+
+check() {
+    local label="$1" pattern="$2"
+    local hits
+    # -e is required: several patterns begin with '-' and would otherwise be
+    # parsed as grep options.
+    hits=$(printf '%s\n' "$STAGED" | grep -nEi -e "$pattern" 2>/dev/null || true)
+    # Placeholders in .env.example and the docs are fine.
+    hits=$(printf '%s\n' "$hits" | grep -vE -e "your-key-here|sk-or-v1-\.\.\.|sk-or-v1-your|xxxxx|<[A-Za-z-]+>|EXAMPLE|PLACEHOLDER" 2>/dev/null || true)
+    # Guard on non-whitespace: a filtered-to-nothing result is still a newline.
+    if [ -n "${hits//[[:space:]]/}" ]; then
+        report "$label" "$hits"
+    fi
+}
+
+check "OpenRouter key"        'sk-or-v1-[A-Za-z0-9_-]{20,}'
+check "Anthropic key"         'sk-ant-[A-Za-z0-9_-]{20,}'
+check "OpenAI key"            '\bsk-[A-Za-z0-9]{32,}'
+check "GitHub token"          '(ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})'
+check "AWS access key"        'AKIA[0-9A-Z]{16}'
+check "Google API key"        'AIza[0-9A-Za-z_-]{30,}'
+check "Slack token"           'xox[baprs]-[A-Za-z0-9-]{10,}'
+check "private key block"     '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+check "assigned secret"       '(api[_-]?key|secret|password|passwd|token)[[:space:]]*[=:][[:space:]]*["'"'"'][A-Za-z0-9_/+.-]{16,}'
+
+# A .env file should never be staged at all.
+if git diff --cached --name-only | grep -qE '(^|/)\.env($|\.)' ; then
+    report "a .env file is staged" "$(git diff --cached --name-only | grep -E '(^|/)\.env($|\.)')"
+fi
+
+if [ "$FOUND" = 1 ]; then
+    echo ""
+    echo "  Nothing was committed. To fix:"
+    echo "    git restore --staged <file>     # unstage it"
+    echo "    then move the value into .env (which is gitignored)"
+    echo ""
+    echo "  If this is a false positive:  git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+exit 0
