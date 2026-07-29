@@ -389,6 +389,11 @@ button:disabled{opacity:.5;cursor:default}
 button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .hint{color:var(--muted);font-size:12.5px;margin-top:10px}
 .ixrow{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.prog{margin-top:10px}
+.ptrack{height:6px;border-radius:99px;background:var(--chip,rgba(127,127,127,.18));overflow:hidden}
+.pbar{height:100%;width:0;border-radius:99px;background:var(--accent,#2563eb);
+  transition:width .12s linear}
+.ptxt{font-size:12px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
 .ixstat{font-size:12.5px;color:var(--muted);line-height:1.7}
 .ixstat code{background:var(--chip,rgba(127,127,127,.14));padding:2px 6px;
   border-radius:5px;font-size:12px;user-select:all}
@@ -435,7 +440,13 @@ footer{color:var(--muted);font-size:12.5px;margin-top:34px;border-top:1px solid 
   <div class="ixrow">
     <button class="ghost" id="scan">Scan folder</button>
     <button class="ghost" id="refresh" hidden>Refresh</button>
+    <button class="ghost" id="pick">Scan a folder on this computer…</button>
+    <input type="file" id="picker" webkitdirectory directory multiple hidden>
     <span class="ixstat" id="ixstat"></span>
+  </div>
+  <div class="prog" id="prog" hidden>
+    <div class="ptrack"><div class="pbar" id="pbar"></div></div>
+    <div class="ptxt" id="ptxt"></div>
   </div>
   <div class="hint">⌘↵ / Ctrl↵ to submit · a folder lets it name real paths · <b>Scan</b> reads the code structure so it can answer questions about what is already there</div>
   <div class="mbox" id="mbox"></div>
@@ -480,7 +491,11 @@ function esc(t){const d=document.createElement('div');d.textContent=t;return d.i
    another machine, so scanning has to happen there and be pushed here. */
 function onThisHost(p){return ROOTS.some(r=>p===r||p.startsWith(r.replace(/\/+$/,'')+'/'))}
 function pushHint(d){
-  return 'scan it on the machine that has it:<br><code>promptx -c '+esc(d)+' --scan --push</code>'}
+  /* Only suggest the CLI when the key is a real absolute path. A folder-name
+     key came from the browser picker, and `promptx -c promptx` would be wrong. */
+  const cli=d.startsWith('/')
+    ? ', or run <code>promptx -c '+esc(d)+' --scan --push</code> on that machine' : '';
+  return 'click <b>Scan a folder on this computer…</b> and pick it'+cli}
 function drawIx(){
   const d=$('dir').value.trim(),f=curFolder(),s=$('ixstat');
   const scan=$('scan'),ref=$('refresh');
@@ -494,7 +509,7 @@ function drawIx(){
       /* A pushed index. This host cannot rescan it — offering Refresh would
          just produce a path error. Show the command that actually works. */
       s.innerHTML='indexed from another machine · '+f.file_count+' files · '+
-        fmtAge(f.scanned_at)+'<br>to update: <code>promptx -c '+esc(d)+' --scan --push</code>';
+        fmtAge(f.scanned_at)+'<br>to update: '+pushHint(d);
       s.className='ixstat on';scan.hidden=true;ref.hidden=true}}
   else{
     if(here){
@@ -530,6 +545,160 @@ async function doScan(force){
       $('ixstat').className='ixstat on'}}
   catch(e){$('ixstat').textContent='scan failed';$('ixstat').className='ixstat err'}
   b.disabled=false;b.textContent=label}
+/* ---- scanning a folder on THIS computer ----
+   The NAS cannot read your laptop, but the browser can. <input webkitdirectory>
+   works on plain HTTP (unlike showDirectoryPicker, which needs a secure
+   context), so the whole scan runs here and only the structural map is sent. */
+const SKIP_DIRS=new Set(['.git','.hg','.svn','node_modules','__pycache__','.venv',
+  'venv','env','dist','build','.next','target','.mypy_cache','.pytest_cache',
+  '.ruff_cache','.tox','.eggs','site-packages','.idea','.vscode','coverage',
+  '.nyc_output','vendor','.terraform','.gradle','Pods','DerivedData']);
+const CODE_EXT=new Set(['.py','.js','.jsx','.ts','.tsx','.mjs','.cjs','.go','.rs',
+  '.rb','.java','.kt','.swift','.c','.h','.cpp','.hpp','.cs','.php','.sh','.bash','.zsh']);
+const DOC_EXT=new Set(['.md','.markdown','.rst','.txt','.adoc']);
+const CONF_EXT=new Set(['.json','.yaml','.yml','.toml','.ini','.cfg']);
+const MAX_FILES=400,MAX_BYTES=400000,MAX_ENTRIES=30;
+
+function extOf(p){const i=p.lastIndexOf('.');return i<0?'':p.slice(i).toLowerCase()}
+function relOf(f){const p=f.webkitRelativePath||f.name;const i=p.indexOf('/');
+  return i<0?p:p.slice(i+1)}
+function skipRel(rel){return rel.split('/').some(s=>SKIP_DIRS.has(s)||s.startsWith('.'))}
+function firstLine(t){for(const l of (t||'').split('\n')){const x=l.trim();
+  if(x)return x.slice(0,160)}return ''}
+function uniq(a,n){return [...new Set(a)].slice(0,n)}
+
+/* The server side uses Python's ast, so it is immune to prose. Here we only
+   have regex, and without this stripping we harvest "imports" and "classes"
+   out of docstrings — a prompt containing the line "import them." really did
+   show up as a dependency. Strip strings and comments before matching.
+   \x22 is a double quote; literal ones would close the Python raw string. */
+function stripPy(src){
+  return src.replace(/[rubf]{0,2}\x22\x22\x22[\s\S]*?\x22\x22\x22/g,'""')
+            .replace(/[rubf]{0,2}'''[\s\S]*?'''/g,"''")
+            .replace(/#[^\n]*/g,'')}
+function stripJs(src){
+  return src.replace(/\/\*[\s\S]*?\*\//g,'')
+            .replace(/^[ \t]*\/\/[^\n]*/gm,'')}
+
+function pyOutline(src){
+  const d=src.match(/^\s*(?:\x22\x22\x22|''')([\s\S]{0,400}?)(?:\x22\x22\x22|''')/);
+  const doc=d?firstLine(d[1]):'';
+  const code=stripPy(src);
+  const imports=[],defs=[];
+  /* [ \t]* not \s* — \s matches newlines, so a greedy ^(\s*) can start at an
+     earlier blank line and swallow them, making every top-level def look
+     indented (and therefore like a method). */
+  for(const m of code.matchAll(/^[ \t]*import\s+([\w.]+)/gm))
+    imports.push(m[1].replace(/\.+$/,''));
+  for(const m of code.matchAll(/^[ \t]*from\s+([\w.]+)\s+import\s/gm))imports.push(m[1]);
+  for(const m of code.matchAll(/^([ \t]*)(?:async\s+)?def\s+(\w+\s*\([^)]{0,140}\))/gm))
+    defs.push((m[1].length?'    .':'def ')+m[2].replace(/\s+/g,' '));
+  for(const m of code.matchAll(/^[ \t]*class\s+(\w+)/gm))defs.push('class '+m[1]);
+  for(const m of code.matchAll(/^([A-Z][A-Z0-9_]{2,})\s*=/gm))defs.push(m[1]+' = ...');
+  return {imports:uniq(imports,20),defs:defs.slice(0,MAX_ENTRIES),doc:doc}}
+
+function jsOutline(src){
+  const code=stripJs(src);
+  const imports=[],defs=[];
+  for(const m of code.matchAll(/(?:from|require\()\s*['"]([^'"]+)['"]/g))imports.push(m[1]);
+  for(const m of code.matchAll(/^[ \t]*(?:export\s+)?(?:async\s+)?function\s+(\w+\s*\([^)]{0,140}\))/gm))
+    defs.push('function '+m[1].replace(/\s+/g,' '));
+  for(const m of code.matchAll(/^[ \t]*(?:export\s+)?class\s+(\w+)/gm))defs.push('class '+m[1]);
+  for(const m of code.matchAll(/^[ \t]*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/gm))
+    defs.push('const '+m[1]+'(...)');
+  return {imports:uniq(imports,20),defs:defs.slice(0,MAX_ENTRIES),doc:''}}
+
+function mdOutline(src){
+  const heads=[];
+  for(const m of src.matchAll(/^(#{1,4})\s+(.+)$/gm))
+    heads.push('  '.repeat(m[1].length-1)+m[1]+' '+m[2].trim());
+  const body=src.replace(/^#{1,4}\s+.+$/gm,'').trim();
+  return {imports:[],defs:heads.slice(0,MAX_ENTRIES),doc:firstLine(body),
+          words:body.split(/\s+/).length}}
+
+function confOutline(src,ext){
+  let keys=[];
+  if(ext==='.json'){try{const o=JSON.parse(src);
+    if(o&&typeof o==='object'&&!Array.isArray(o))keys=Object.keys(o)}catch(e){}}
+  else{for(const m of src.matchAll(/^([A-Za-z_][\w.-]*)\s*[:=]/gm))keys.push(m[1])}
+  /* key NAMES only — values are where secrets live */
+  return {imports:[],defs:uniq(keys,MAX_ENTRIES),doc:''}}
+
+function outlineFor(rel,src){
+  const e=extOf(rel);
+  if(e==='.py')return pyOutline(src);
+  if(['.js','.jsx','.ts','.tsx','.mjs','.cjs'].includes(e))return jsOutline(src);
+  if(DOC_EXT.has(e))return mdOutline(src);
+  if(CONF_EXT.has(e))return confOutline(src,e);
+  if(CODE_EXT.has(e)){const defs=[];
+    for(const m of src.matchAll(/^\s*(?:pub\s+|public\s+|static\s+|export\s+)*(?:func|fn|class|struct|interface|type|impl)\s+(\w[\w<>, ]{0,80})/gm))
+      defs.push(m[1].trim());
+    return {imports:[],defs:defs.slice(0,MAX_ENTRIES),doc:''}}
+  return null}
+
+function showProg(done,total,label){
+  $('prog').hidden=false;
+  const pct=total?Math.round(done/total*100):0;
+  $('pbar').style.width=pct+'%';
+  $('ptxt').textContent=label||(done+' / '+total+' files  ·  '+pct+'%')}
+
+async function scanLocal(fileList){
+  const all=[...fileList];
+  if(!all.length)return;
+
+  /* The browser gives the folder NAME but never its absolute path — that is a
+     deliberate privacy boundary, not something to work around. So never demand
+     the full path: if the box already holds one whose last segment matches what
+     was picked, keep it (it will line up with `promptx -c <path>` on the CLI).
+     Otherwise just key the index by folder name and fill the box in, so picking
+     a folder is all it ever takes. */
+  const picked=all[0].webkitRelativePath.split('/')[0];
+  const typed=$('dir').value.trim();
+  const typedBase=typed.replace(/\/+$/,'').split('/').pop();
+  const root=(typed && typedBase===picked) ? typed : picked;
+  if(root!==typed)$('dir').value=root;
+
+  const keep=[];
+  for(const f of all){
+    const rel=relOf(f);
+    if(!rel||skipRel(rel))continue;
+    keep.push({f,rel});
+    if(keep.length>=MAX_FILES)break}
+
+  showProg(0,keep.length,'reading '+keep.length+' files (of '+all.length+' in the folder)…');
+  const files={};let parsed=0;
+  for(let i=0;i<keep.length;i++){
+    const {f,rel}=keep[i];
+    const e={size:f.size,mtime:Math.floor(f.lastModified/1000)};
+    const ext=extOf(rel);
+    if(f.size<=MAX_BYTES&&(CODE_EXT.has(ext)||DOC_EXT.has(ext)||CONF_EXT.has(ext))){
+      try{const o=outlineFor(rel,await f.text());
+        if(o){Object.assign(e,o);parsed++}}
+      catch(err){}}
+    files[rel]=e;
+    if(i%8===0||i===keep.length-1){showProg(i+1,keep.length);
+      await new Promise(r=>setTimeout(r,0))}}
+
+  showProg(keep.length,keep.length,'uploading map…');
+  const payload={root:root,scanned_at:Math.floor(Date.now()/1000),
+    file_count:Object.keys(files).length,parsed:parsed,reused:0,
+    truncated:keep.length>=MAX_FILES,files:files};
+  try{
+    const r=await fetch('/api/index',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const j=await r.json();
+    if(j.error){$('ixstat').textContent=j.error;$('ixstat').className='ixstat err'}
+    else{await loadFolders();
+      $('ixstat').textContent='indexed '+j.file_count+' files ('+parsed+
+        ' read for structure) — ready to use';
+      $('ixstat').className='ixstat on'}}
+  catch(err){$('ixstat').textContent='upload failed: '+err;
+    $('ixstat').className='ixstat err'}
+  setTimeout(()=>{$('prog').hidden=true},1200)}
+
+$('pick').onclick=()=>$('picker').click();
+$('picker').onchange=e=>{scanLocal(e.target.files);e.target.value=''};
+
 $('scan').onclick=()=>doScan(false);
 $('refresh').onclick=()=>doScan(false);
 $('dir').addEventListener('input',drawIx);
