@@ -345,7 +345,12 @@ def list_folders():
         out.append({"path": path,
                     "indexed": bool(row),
                     "file_count": row["file_count"] if row else 0,
-                    "scanned_at": row["scanned_at"] if row else 0})
+                    "scanned_at": row["scanned_at"] if row else 0,
+                    # A pushed index describes files this host cannot see, so
+                    # it can never be rescanned here — only re-pushed from the
+                    # machine that owns them.
+                    "remote": bool(row and row.get("remote")),
+                    "scannable": bool(safe_root(path))})
     # indexed folders first — those are the ones being actively worked on
     return sorted(out, key=lambda r: (not r["indexed"], -r["scanned_at"], r["path"]))
 
@@ -384,7 +389,9 @@ button:disabled{opacity:.5;cursor:default}
 button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .hint{color:var(--muted);font-size:12.5px;margin-top:10px}
 .ixrow{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
-.ixstat{font-size:12.5px;color:var(--muted)}
+.ixstat{font-size:12.5px;color:var(--muted);line-height:1.7}
+.ixstat code{background:var(--chip,rgba(127,127,127,.14));padding:2px 6px;
+  border-radius:5px;font-size:12px;user-select:all}
 .ixstat.on{color:#16a34a}
 .ixstat.err{color:#dc2626}
 .mbox{background:var(--chip);border:1px solid var(--line);border-radius:10px;
@@ -450,6 +457,7 @@ Always read the expansion before running it; it commits confidently to one readi
 <script>
 const $=i=>document.getElementById(i);
 const MODELS=__MODELS__;
+const ROOTS=__ROOTS__;
 const tb=$('tb');
 tb.onclick=()=>{const c=document.documentElement.getAttribute('data-theme');
   const n=c==='light'?'dark':'light';document.documentElement.setAttribute('data-theme',n);
@@ -467,15 +475,34 @@ function fmtAge(ts){if(!ts)return'';const s=Math.floor(Date.now()/1000)-ts;
   if(s<90)return'just now';if(s<5400)return Math.round(s/60)+'m ago';
   if(s<172800)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago'}
 function curFolder(){return FOLDERS.find(f=>f.path===$('dir').value.trim())}
+function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+/* Can THIS host read that path? Anything outside the project roots lives on
+   another machine, so scanning has to happen there and be pushed here. */
+function onThisHost(p){return ROOTS.some(r=>p===r||p.startsWith(r.replace(/\/+$/,'')+'/'))}
+function pushHint(d){
+  return 'scan it on the machine that has it:<br><code>promptx -c '+esc(d)+' --scan --push</code>'}
 function drawIx(){
   const d=$('dir').value.trim(),f=curFolder(),s=$('ixstat');
-  if(!d){s.textContent='';s.className='ixstat';
-    $('scan').hidden=false;$('refresh').hidden=true;return}
+  const scan=$('scan'),ref=$('refresh');
+  if(!d){s.textContent='';s.className='ixstat';scan.hidden=true;ref.hidden=true;return}
+  const here=onThisHost(d);
   if(f&&f.indexed){
-    s.textContent='indexed · '+f.file_count+' files · '+fmtAge(f.scanned_at);
-    s.className='ixstat on';$('scan').hidden=true;$('refresh').hidden=false}
-  else{s.textContent='not indexed — it can see file names only';
-    s.className='ixstat';$('scan').hidden=false;$('refresh').hidden=true}}
+    if(here){
+      s.textContent='indexed · '+f.file_count+' files · '+fmtAge(f.scanned_at);
+      s.className='ixstat on';scan.hidden=true;ref.hidden=false}
+    else{
+      /* A pushed index. This host cannot rescan it — offering Refresh would
+         just produce a path error. Show the command that actually works. */
+      s.innerHTML='indexed from another machine · '+f.file_count+' files · '+
+        fmtAge(f.scanned_at)+'<br>to update: <code>promptx -c '+esc(d)+' --scan --push</code>';
+      s.className='ixstat on';scan.hidden=true;ref.hidden=true}}
+  else{
+    if(here){
+      s.textContent='not indexed — it can see file names only';
+      s.className='ixstat';scan.hidden=false;ref.hidden=true}
+    else{
+      s.innerHTML='not on this NAS — '+pushHint(d);
+      s.className='ixstat';scan.hidden=true;ref.hidden=true}}}
 async function loadFolders(){
   try{const r=await fetch('/api/folders');FOLDERS=(await r.json()).folders||[]}
   catch(e){FOLDERS=[]}
@@ -568,7 +595,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if route not in ("/", "/index.html"):
             self.send_error(404)
             return
-        body = PAGE.replace("__MODELS__", json.dumps(MODELS)).encode()
+        body = (PAGE.replace("__MODELS__", json.dumps(MODELS))
+            .replace("__ROOTS__", json.dumps(PROJECT_ROOTS))).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

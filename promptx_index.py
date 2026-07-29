@@ -286,7 +286,9 @@ def list_indexed(cache_dir):
             data = json.loads(f.read_text(encoding="utf-8"))
             out.append({"root": data.get("root", "?"),
                         "file_count": data.get("file_count", 0),
-                        "scanned_at": data.get("scanned_at", 0)})
+                        "scanned_at": data.get("scanned_at", 0),
+                        # pushed from another machine — this host cannot rescan it
+                        "remote": bool(data.get("remote"))})
         except (json.JSONDecodeError, OSError):
             continue
     return sorted(out, key=lambda r: -r["scanned_at"])
