@@ -25,6 +25,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import time
 
 # Directories that are never worth indexing.
@@ -313,8 +314,263 @@ def list_indexed(cache_dir):
 
 
 # --------------------------------------------------------------------------
-# the verification gate
+# snapshot and check — observing reality instead of trusting a report
 # --------------------------------------------------------------------------
+#
+# Every earlier attempt at this tried to make the agent honest: demand raw
+# output, forbid summarizing, insist on the whole suite. That is unwinnable —
+# a claim cannot be verified by asking the claimant more firmly.
+#
+# So don't. promptx runs on the same machine as the files. Record the state
+# before, look again after, and run the tests here. The agent's report stops
+# being evidence and becomes a claim to check against what actually happened.
+
+SNAP_MAX_HASH_BYTES = 2_000_000   # above this, fall back to size+mtime
+
+
+def snap_path(root, cache_dir):
+    h = hashlib.sha1(str(pathlib.Path(root).resolve()).encode()).hexdigest()[:16]
+    return pathlib.Path(cache_dir) / f"{h}-snap.json"
+
+
+def _file_sha(path):
+    """Content hash. mtime alone is too weak — `touch` fakes a change, and an
+    agent that rewrites a file byte-identically has not changed anything."""
+    try:
+        if path.stat().st_size > SNAP_MAX_HASH_BYTES:
+            return None
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()[:32]
+    except OSError:
+        return None
+
+
+def _walk_state(root):
+    """{relpath: {size, mtime, sha}} for everything worth watching."""
+    root = pathlib.Path(root).resolve()
+    state = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames
+                       if d not in SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            full = pathlib.Path(dirpath) / name
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+            state[str(full.relative_to(root))] = {
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+                "sha": _file_sha(full),
+            }
+    return state
+
+
+def run_tests(root, cmd, timeout=900):
+    """Run the project's own test command HERE, and keep what it printed.
+
+    This is the whole point: the result comes from execution, not from a
+    paragraph an agent wrote about execution.
+    """
+    if not cmd:
+        return None
+    try:
+        p = subprocess.run(cmd, shell=True, cwd=str(root), timeout=timeout,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True)
+        out = p.stdout or ""
+        rc = p.returncode
+    except subprocess.TimeoutExpired:
+        return {"cmd": cmd, "summary": f"TIMED OUT after {timeout}s",
+                "returncode": None, "output": ""}
+    except OSError as exc:
+        return {"cmd": cmd, "summary": f"could not run: {exc}",
+                "returncode": None, "output": ""}
+
+    lines = [l for l in out.splitlines() if l.strip()]
+    return {"cmd": cmd, "returncode": rc,
+            "summary": lines[-1][:200] if lines else "(no output)",
+            "output": out[-4000:]}
+
+
+def spec_paths(text, known=()):
+    """Repo-relative paths a work order actually names.
+
+    Backticked tokens are the reliable signal — the system prompt requires full
+    relative paths, and models comply. Anything already in the index counts too,
+    which catches paths mentioned in prose.
+    """
+    if not text:
+        return []
+    found = set()
+    for m in re.finditer(r"`([^`\n]{2,120})`", text):
+        tok = m.group(1).strip().strip(",.;:")
+        if " " in tok and "/" not in tok:
+            continue
+        if "/" in tok or re.search(r"\.\w{1,5}$", tok):
+            found.add(tok.lstrip("./"))
+    for k in known:
+        if k in text:
+            found.add(k)
+    return sorted(found)
+
+
+def snapshot(root, cache_dir, spec=None, with_tests=True, index=None):
+    """Record the baseline: file state, the spec, and the current test result."""
+    root = pathlib.Path(root).resolve()
+    idx = index or load_index(root, cache_dir) or {}
+    cmd = test_command(idx) if idx else None
+
+    snap = {
+        "root": str(root),
+        "taken_at": int(time.time()),
+        "vcs": idx.get("vcs"),
+        "files": _walk_state(root),
+        "spec": spec,
+        "spec_files": spec_paths(spec, (idx.get("files") or {}).keys()),
+        "tests": run_tests(root, cmd) if (with_tests and cmd) else None,
+    }
+    try:
+        p = snap_path(root, cache_dir)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(snap), encoding="utf-8")
+    except OSError:
+        pass
+    return snap
+
+
+def load_snapshot(root, cache_dir):
+    p = snap_path(root, cache_dir)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _changed(before, after):
+    """(modified, added, deleted) by content where hashes exist, else metadata."""
+    modified, added = [], []
+    for rel, now in after.items():
+        was = before.get(rel)
+        if was is None:
+            added.append(rel)
+        elif was.get("sha") and now.get("sha"):
+            if was["sha"] != now["sha"]:
+                modified.append(rel)
+        elif was["size"] != now["size"] or was["mtime"] != now["mtime"]:
+            modified.append(rel)
+    deleted = [r for r in before if r not in after]
+    return sorted(modified), sorted(added), sorted(deleted)
+
+
+def compare(root, cache_dir, with_tests=True):
+    """What actually happened, versus what the work order asked for."""
+    root = pathlib.Path(root).resolve()
+    before = load_snapshot(root, cache_dir)
+    if not before:
+        return {"error": "no snapshot for this folder — run --snap first"}
+
+    idx = load_index(root, cache_dir) or {}
+    after_files = _walk_state(root)
+    modified, added, deleted = _changed(before["files"], after_files)
+    touched = set(modified) | set(added) | set(deleted)
+
+    named = set(before.get("spec_files") or [])
+    # A named path that does not exist yet is still legitimately "named".
+    done = sorted(p for p in named if p in touched)
+    untouched = sorted(p for p in named if p not in touched)
+    unspecified = sorted(p for p in touched if p not in named)
+
+    cmd = test_command(idx) if idx else None
+    tests_after = run_tests(root, cmd) if (with_tests and cmd) else None
+
+    return {
+        "root": str(root),
+        "taken_at": before["taken_at"],
+        "elapsed_s": int(time.time()) - before["taken_at"],
+        "had_spec": bool(before.get("spec")),
+        "modified": modified, "added": added, "deleted": deleted,
+        "spec_named": sorted(named),
+        "spec_done": done,
+        "spec_untouched": untouched,
+        "unspecified": unspecified,
+        "tests_before": before.get("tests"),
+        "tests_after": tests_after,
+    }
+
+
+def format_report(rep):
+    """Human-readable, and honest about what it cannot know."""
+    if rep.get("error"):
+        return f"promptx: {rep['error']}"
+
+    L = []
+    total = len(rep["modified"]) + len(rep["added"]) + len(rep["deleted"])
+    L.append(f"Comparing against snapshot from {rep['elapsed_s']}s ago")
+    L.append("")
+
+    if rep["had_spec"]:
+        L.append(f"SPEC NAMED {len(rep['spec_named'])} PATH(S)")
+        for p in rep["spec_done"]:
+            L.append(f"  [changed]   {p}")
+        for p in rep["spec_untouched"]:
+            L.append(f"  [UNTOUCHED] {p}   <- named in the spec, never changed")
+        if not rep["spec_named"]:
+            L.append("  (no paths parsed out of the work order)")
+        L.append("")
+    else:
+        L.append("No spec was recorded with this snapshot "
+                 "(use --snap together with a request).")
+        L.append("")
+
+    L.append(f"ACTUAL CHANGES ({total})")
+    for p in rep["added"]:
+        L.append(f"  [added]     {p}")
+    for p in rep["modified"]:
+        L.append(f"  [modified]  {p}")
+    for p in rep["deleted"]:
+        L.append(f"  [deleted]   {p}")
+    if not total:
+        L.append("  nothing changed on disk")
+    L.append("")
+
+    if rep["had_spec"] and rep["unspecified"]:
+        L.append(f"UNSPECIFIED ({len(rep['unspecified'])}) "
+                 f"- changed but never named in the spec")
+        for p in rep["unspecified"]:
+            L.append(f"  ! {p}")
+        L.append("")
+
+    tb, ta = rep.get("tests_before"), rep.get("tests_after")
+    if ta:
+        L.append("TESTS  (run here, not reported by the agent)")
+        L.append(f"  command: {ta['cmd']}")
+        if tb:
+            L.append(f"  before:  {tb['summary']}")
+        L.append(f"  after:   {ta['summary']}")
+        if tb and tb.get("returncode") is not None and ta.get("returncode") is not None:
+            if tb["returncode"] != 0 and ta["returncode"] == 0:
+                L.append("  -> was failing, now passing")
+            elif tb["returncode"] == 0 and ta["returncode"] != 0:
+                L.append("  -> WAS PASSING, NOW FAILING")
+        L.append("")
+
+    problems = []
+    if rep["spec_untouched"]:
+        problems.append(f"{len(rep['spec_untouched'])} specified path(s) never changed")
+    if rep["unspecified"]:
+        problems.append(f"{len(rep['unspecified'])} unspecified change(s)")
+    if ta and ta.get("returncode") not in (0, None):
+        problems.append("tests are failing")
+    L.append("FAIL: " + "; ".join(problems) if problems else "OK")
+    return "\n".join(L)
 
 # Marker for "this build produces a runnable test command", detected from the
 # index rather than guessed. Order matters: first match wins per language.

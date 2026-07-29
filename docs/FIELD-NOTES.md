@@ -209,15 +209,41 @@ soundness is judgement rather than derivation. It would want the **strongest**
 cheap model available, not the weakest — an unskeptical model asked to audit
 will rubber-stamp.
 
-### B. Nothing compares what changed against what was specified
-Even with honest test output, nothing diffs the files the agent *touched*
-against the files the spec *named*. This is mechanical, not judgement: parse
-paths out of the work order, compare with `git diff --name-only`. It would have
-caught the "listed a file it never edited" case directly.
+### ~~B. Nothing compares what changed against what was specified~~ — SOLVED
+### ~~C. Silent scope creep is invisible~~ — SOLVED
 
-### C. Silent scope creep is invisible
-The inverse of B — files modified that the spec never mentioned. Same
-mechanism, opposite direction.
+Both, plus most of the "agent can fabricate output" problem, by one mechanism:
+`--snap` / `--check`.
+
+**The reframe.** Every earlier attempt tried to make the agent *honest* —
+demand raw output, forbid summarizing, insist on the whole suite. That is
+unwinnable; a claim cannot be verified by asking the claimant more firmly.
+
+So stop. promptx runs on the same machine as the files. Record state before,
+look again after, and **run the tests here**. The agent's report stops being
+evidence and becomes a claim to check.
+
+Verified against a deliberately dishonest change — specified fix applied, a
+second specified file skipped, an unrelated file quietly edited:
+
+```
+SPEC NAMED 2 PATH(S)
+  [changed]   src/calc.py
+  [UNTOUCHED] README.md   <- named in the spec, never changed
+
+UNSPECIFIED (1) - changed but never named in the spec
+  ! tests/test_calc.py
+
+TESTS  (run here, not reported by the agent)
+  before: 1 failed, 1 passed    after: 3 passed
+FAIL: 1 specified path(s) never changed; 1 unspecified change(s)
+```
+
+All three caught. Exit 1 on mismatch, so it composes with `&&`.
+
+**What this still cannot do.** A suite that was already green stays green
+whether the agent worked or slept. Tests prove the code works; the diff proves
+the agent did something. Neither alone is sufficient.
 
 ### D. Ambiguity is resolved silently
 The expander commits to one reading with no signal that it chose. Asked to

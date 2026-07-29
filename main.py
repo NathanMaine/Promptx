@@ -296,7 +296,30 @@ def main():
                     help="upload the index to the hosted promptx so other devices "
                          f"can use it (default {HOSTED_URL})")
     ap.add_argument("--folders", action="store_true", help="list indexed folders")
+    ap.add_argument("--snap", action="store_true",
+                    help="record -c DIR's current state (and this work order) "
+                         "so --check can later compare reality against it")
+    ap.add_argument("--check", action="store_true",
+                    help="compare -c DIR against the last --snap: what really "
+                         "changed, what the spec named, and the test result "
+                         "run HERE. Exits 1 on mismatch.")
+    ap.add_argument("--no-tests", action="store_true",
+                    help="with --snap/--check, skip running the test suite")
     args = ap.parse_args()
+
+    if args.check:
+        if promptx_index is None:
+            raise SystemExit("promptx: promptx_index.py is not installed next to promptx")
+        if not args.context:
+            raise SystemExit("promptx: --check needs a folder, e.g.  promptx -c . --check")
+        rep = promptx_index.compare(args.context, INDEX_DIR,
+                                    with_tests=not args.no_tests)
+        print(promptx_index.format_report(rep))
+        if rep.get("error"):
+            return 2
+        bad = (rep["spec_untouched"] or rep["unspecified"]
+               or (rep.get("tests_after") or {}).get("returncode") not in (0, None))
+        return 1 if bad else 0
 
     if args.folders:
         if promptx_index is None:
@@ -344,6 +367,21 @@ def main():
         print(f"\n\033[2m── expanded via {who} ──\033[0m\n")
         print(result)
         print(f"\n\033[2m{'─' * 44}\033[0m")
+
+    if args.snap:
+        if promptx_index is None:
+            raise SystemExit("promptx: promptx_index.py is not installed next to promptx")
+        if not args.context:
+            raise SystemExit("promptx: --snap needs a folder, e.g.  promptx -c . --snap \"...\"")
+        snap = promptx_index.snapshot(args.context, INDEX_DIR, spec=result,
+                                      with_tests=not args.no_tests, index=idx)
+        n = len(snap["spec_files"])
+        print(f"\n\033[2m── snapshot: {len(snap['files'])} files, "
+              f"{n} path(s) parsed from this work order"
+              f"{'' if snap['tests'] is None else ', tests: ' + snap['tests']['summary']}"
+              f"\033[0m", file=sys.stderr)
+        print(f"\033[2m   when the agent is done:  promptx -c {args.context} --check\033[0m",
+              file=sys.stderr)
 
     if args.copy:
         try:

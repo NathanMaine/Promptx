@@ -32,6 +32,9 @@ promptx [-c DIR] [-x] [-m MODEL] [--local] [--copy] [--raw] [--models] REQUEST..
 | `--scan` | Build/refresh the structural index for `-c DIR`. Incremental. |
 | `--push` | Also upload that index to the hosted instance (`PROMPTX_HOSTED_URL`). |
 | `--folders` | List indexed folders, with file counts and scan times. |
+| `--snap` | Record `-c DIR`'s state and this work order, for `--check` to compare against. |
+| `--check` | Compare against the last `--snap`. Exits 1 on mismatch. |
+| `--no-tests` | With `--snap`/`--check`, skip running the suite. |
 
 ### Which install sees which filesystem
 
@@ -237,6 +240,58 @@ against it from a phone — the server never needs to see those files.
 `POST /api/index` has the same trust model as the rest of the hosted server:
 none. Anyone on the LAN can store an index. Payloads over 4 MB are rejected.
 Keep it on the LAN.
+
+## Verifying what the agent actually did
+
+The verification gate makes a false report harder and more conspicuous. It
+cannot make one impossible — promptx emits text and never observes execution,
+so an agent can fabricate pasted output wholesale.
+
+`--snap` / `--check` sidesteps that entirely. Instead of trying to make the
+agent honest, it makes the agent's honesty irrelevant: promptx records the
+state before, looks again after, and runs the tests itself.
+
+```bash
+promptx -c . --snap "add retry logic to the api client"   # spec + baseline
+# ... hand the work order to your agent ...
+promptx -c . --check                                      # what really happened
+```
+
+```
+SPEC NAMED 2 PATH(S)
+  [changed]   src/calc.py
+  [UNTOUCHED] README.md   <- named in the spec, never changed
+
+ACTUAL CHANGES (2)
+  [modified]  src/calc.py
+  [modified]  tests/test_calc.py
+
+UNSPECIFIED (1) - changed but never named in the spec
+  ! tests/test_calc.py
+
+TESTS  (run here, not reported by the agent)
+  before:  1 failed, 1 passed
+  after:   3 passed
+  -> was failing, now passing
+
+FAIL: 1 specified path(s) never changed; 1 unspecified change(s)
+```
+
+Exit code is 1 on any mismatch, so it composes:
+`promptx -c . --check && git commit -am "done"`.
+
+**How change is detected.** SHA-256 of file contents, falling back to
+size+mtime for files over 2 MB. Content hashing matters: `touch` fakes an mtime
+change, and an agent that rewrites a file byte-identically has not changed
+anything.
+
+**Which paths the spec "named"** comes from backticked tokens in the work
+order, plus anything already in the index that appears in the text. The system
+prompt requires full relative paths, so backticks are reliable in practice.
+
+**What it still cannot tell you.** If a suite was already green it stays green
+whether the agent worked or slept. Tests prove the code works; the *diff*
+proves the agent did something. Read both.
 
 ## Configuration
 
