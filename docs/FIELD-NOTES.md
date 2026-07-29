@@ -251,9 +251,24 @@ FAIL: 1 specified path(s) never changed; 1 unspecified change(s)
 
 All three caught. Exit 1 on mismatch, so it composes with `&&`.
 
-**What this still cannot do.** A suite that was already green stays green
-whether the agent worked or slept. Tests prove the code works; the diff proves
-the agent did something. Neither alone is sufficient.
+**The residue, narrowed and then narrowed again.** A suite that was already
+green stays green whether the agent worked or slept. The sleeping agent was
+already caught (`spec_untouched` fails the check). What survived was the
+*trivial-touch* agent: edit every named file meaninglessly, suite green both
+sides, check passes.
+
+Two-part fix. `--check` now detects the **indiscriminate suite** — green
+before and after with identical counts — and downgrades its verdict to
+`OK (unproven): files changed and nothing broke, but no test discriminates
+this work from a no-op`. Not a FAIL, because docs tasks legitimately leave
+the suite untouched; but never a bare OK that overclaims.
+
+And the system prompt now requires build-task work orders to include a test
+that FAILS before the change and PASSES after. When the agent complies, the
+count change makes the work observable, and the verdict is a clean OK.
+
+What remains after that is quality — the change is real and tested, but is it
+*good*? That is #6, the model audit of spec-versus-diff.
 
 ### ~~D. Ambiguity is resolved silently~~ — SOLVED
 

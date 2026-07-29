@@ -63,6 +63,9 @@ import them.
    - Include a command that proves which files changed (e.g. `git diff --stat`).
    - State: report numbers exactly as printed, including failures. Do not round,
      total, or characterize them. If something fails, say so and stop.
+   - For build tasks: include a NEW or EXTENDED test that FAILS before the
+     change and PASSES after it. A suite that is green both before and after
+     proves nothing about the work — it only proves nothing broke.
 5. Add a short "Do NOT" section naming the likeliest wrong turn for this task.
 5b. If the request admits more than one reasonable reading (e.g. "coverage" could mean test coverage or feature coverage), the FIRST line of your output must be:  READ AS: <the reading you chose>  — one line, so a wrong choice is caught in one second instead of after an hour of correct work on the wrong goal. If only one reading is sensible, omit the line entirely; do not use it to restate obvious requests.
 6. Under 250 words. Dense and specific, not padded.

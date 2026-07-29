@@ -23,6 +23,9 @@ Notable changes. Bug detail — symptom, diagnosis, fix — lives in
   Catches the FIELD-NOTES bug-8 spec verbatim. Mostly closes #1.
 - `READ AS:` line — ambiguous requests now declare the chosen reading on line
   one instead of resolving it silently. Closes #4.
+- Indiscriminate-suite detection in `--check`: green-before/green-after with
+  identical counts now yields `OK (unproven)` instead of a bare OK, and build
+  specs must include a test that fails before and passes after.
 
 ### Fixed
 - Work orders silently truncated at `max_tokens` (900 -> 2400, plus an explicit

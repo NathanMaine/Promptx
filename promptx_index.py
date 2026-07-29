@@ -549,6 +549,7 @@ def format_report(rep):
         L.append("")
 
     tb, ta = rep.get("tests_before"), rep.get("tests_after")
+    indiscriminate = False
     if ta:
         L.append("TESTS  (run here, not reported by the agent)")
         L.append(f"  command: {ta['cmd']}")
@@ -560,6 +561,19 @@ def format_report(rep):
                 L.append("  -> was failing, now passing")
             elif tb["returncode"] == 0 and ta["returncode"] != 0:
                 L.append("  -> WAS PASSING, NOW FAILING")
+            elif (tb["returncode"] == 0 and ta["returncode"] == 0
+                  and tb["summary"] == ta["summary"]):
+                # Green before, green after, same counts: this suite cannot
+                # tell work from no-work. The diff says the files changed;
+                # nothing observable says the change DOES anything. An agent
+                # that appended a comment to every named file passes both
+                # checks. Only a discriminating test closes this.
+                indiscriminate = True
+                L.append("  -> INDISCRIMINATE: green before and after with "
+                         "identical counts. The suite cannot tell whether the "
+                         "work was done — only that nothing broke. For build "
+                         "tasks, demand a test that fails before and passes "
+                         "after.")
         L.append("")
 
     problems = []
@@ -569,7 +583,15 @@ def format_report(rep):
         problems.append(f"{len(rep['unspecified'])} unspecified change(s)")
     if ta and ta.get("returncode") not in (0, None):
         problems.append("tests are failing")
-    L.append("FAIL: " + "; ".join(problems) if problems else "OK")
+    if problems:
+        L.append("FAIL: " + "; ".join(problems))
+    elif indiscriminate:
+        # Not a FAIL — docs-only tasks legitimately leave the suite untouched.
+        # But OK would overclaim, so say exactly what was and wasn't proven.
+        L.append("OK (unproven): files changed and nothing broke, but no test "
+                 "discriminates this work from a no-op.")
+    else:
+        L.append("OK")
     return "\n".join(L)
 
 # Marker for "this build produces a runnable test command", detected from the
