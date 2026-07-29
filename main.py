@@ -347,6 +347,35 @@ def main():
             raise SystemExit("promptx: --scan needs a folder, e.g.  promptx -c . --scan")
         return do_scan_cli(args.context, push=args.push)
 
+    if args.snap and not args.request:
+        # Web-UI bridge: the spec was generated in the browser and Copied.
+        # Read it from the clipboard so snap still knows which paths the work
+        # order names — the flow is Copy -> `promptx -c DIR --snap` -> paste
+        # into the agent -> `promptx -c DIR --check`.
+        if promptx_index is None:
+            raise SystemExit("promptx: promptx_index.py is not installed next to promptx")
+        if not args.context:
+            raise SystemExit("promptx: --snap needs a folder, e.g.  promptx -c . --snap")
+        spec = None
+        try:
+            out = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=5)
+            clip = (out.stdout or "").strip()
+            # Only treat the clipboard as a work order if it looks like one —
+            # otherwise whatever you last copied becomes the "spec" silently.
+            if len(clip) > 40 and ("`" in clip or "VERIFICATION" in clip.upper()):
+                spec = clip
+        except (FileNotFoundError, subprocess.SubprocessError):
+            pass
+        idx = load_idx(args.context)
+        snap = promptx_index.snapshot(args.context, INDEX_DIR, spec=spec,
+                                      with_tests=not args.no_tests, index=idx)
+        src = "clipboard spec" if spec else "no spec (baseline only)"
+        t = snap["tests"]["summary"] if snap["tests"] else "not run"
+        print(f"snapshot: {len(snap['files'])} files · {src} · "
+              f"{len(snap['spec_files'])} path(s) named · tests: {t}")
+        print(f"when the agent is done:  promptx -c {args.context!r} --check")
+        return 0
+
     if args.models:
         print("\nSuggested expander models (one short call — cheap and fast wins):\n")
         for name, why in SUGGESTED:
