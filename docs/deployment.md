@@ -107,6 +107,23 @@ ssh nas 'sudo systemctl restart promptx && sleep 2 && systemctl is-active prompt
 ssh nas 'journalctl -u promptx -n 20 --no-pager'
 ```
 
+### Pick ONE autostart mechanism
+
+If you install the systemd unit **and** run promptx as a container, they will
+race for the port on every boot. Whichever wins, the other's restart policy
+fails with `bind: address already in use` — and because one of them does start,
+the page answers 200 and the conflict looks like success.
+
+Check before you add a second:
+
+```bash
+systemctl is-enabled promptx 2>/dev/null   # unit installed?
+docker ps -a --filter name=promptx         # container installed?
+```
+
+Exactly one should exist. `nas-setup.sh` installs the systemd unit as part of
+its work, so if you have run it, you already have one.
+
 ### If your NAS is not systemd
 
 Check with `[ -d /run/systemd/system ] && echo systemd`. If it isn't, use the

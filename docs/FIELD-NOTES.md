@@ -228,6 +228,59 @@ real thing — the same principle --check itself is built on.
 
 ---
 
+### 11. Two correct autostart mechanisms, broken only in combination
+**Found:** 2026-07-29 · **Fixed:** same day
+
+**Symptom.** After a NAS restart, promptx "did not auto start" — except the
+page answered HTTP 200. The container showed `Exited (137)`, and the NAS log
+showed the restart policy *trying* and failing:
+
+```
+Failed to start container promptx. Error starting userland proxy:
+listen tcp4 0.0.0.0:7331: bind: address already in use
+```
+
+**Diagnosis.** Two autostart mechanisms existed, both introduced by me, each
+fine alone:
+
+1. A **systemd unit**, installed as a side effect of `nas-setup.sh` — which
+   the user ran for the docker group, not for this.
+2. A **Docker container** with `restart: unless-stopped`, added later without
+   noticing the unit existed.
+
+On boot they raced for port 7331. systemd won; Docker's restart policy fired
+correctly and was blocked by a port squatter. Neither mechanism was broken.
+Their combination was.
+
+**The silent half, which was worse.** The page served 200, so it looked
+healthy — but `/api/folders` returned **zero indexed folders**. `INDEX_DIR`
+defaulted to `/app/.index`, a path that exists only *inside* the container.
+Running on the host it pointed at nothing, so every folder read as
+un-indexed and expansions silently degraded to filename-only mode. A visible
+crash would have been kinder.
+
+**Fix.** `INDEX_DIR` now resolves from the script's own location. Because the
+container bind-mounts the project at `/app`, `/app/.index` and
+`<script dir>/.index` are the same directory on disk — so the two deployment
+styles share one index store and can no longer disagree. Then the duplicate
+was retired: the container removed, systemd left as the single owner (it was
+already installed *and* enabled, which the container never was).
+
+**Verified:** one listener on 7331, one process, `key=yes`, four indexes
+visible, `SIGKILL` → back in under 8s via `Restart=always` (NRestarts=5),
+and a live expansion still carrying its verification gate.
+
+**Lessons.** Two of them, and the second is embarrassing:
+
+- A service that responds 200 is not a service that works. Health checks
+  should assert a *capability* — "can it see its indexes?" — not just that
+  something is listening.
+- I ran `pkill -f "promptx-server.py"` during the fix. The pattern matched my
+  own SSH command and killed the session — **a trap already written down in
+  my own notes.** Kill by PID.
+
+---
+
 ## OPEN
 
 ### ~~A. Nothing checks whether the plan is sound~~ — MOSTLY SOLVED

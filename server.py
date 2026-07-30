@@ -28,7 +28,15 @@ SPARK_URL = os.getenv("PROMPTX_SPARK_URL", "http://10.0.4.93:11434/v1/chat/compl
 SPARK_MODEL = os.getenv("PROMPTX_SPARK_MODEL", "qwen3.6-uncensored:latest")
 ENV_FILE = pathlib.Path(os.getenv("PROMPTX_ENV", "/volume1/Projects/promptx/.env"))
 PROJECT_ROOTS = ["/volume1/Projects", "/volume1/@home/Natron"]
-INDEX_DIR = pathlib.Path(os.getenv("PROMPTX_INDEX_DIR", "/app/.index"))
+# The container bind-mounts this project at /app, so /app/.index and
+# <script dir>/.index are THE SAME directory on disk. Resolving it from the
+# script's own location instead of hardcoding /app means the container and a
+# bare host process share one index store — they used to disagree, and the
+# host process silently saw zero indexed folders because /app does not exist
+# outside the container.
+_DEFAULT_INDEX = (pathlib.Path("/app/.index") if pathlib.Path("/app").is_dir()
+                  else pathlib.Path(__file__).resolve().parent / ".index")
+INDEX_DIR = pathlib.Path(os.getenv("PROMPTX_INDEX_DIR", str(_DEFAULT_INDEX)))
 
 # id, label, cost, strength, best-for
 MODELS = [
