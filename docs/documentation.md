@@ -303,6 +303,7 @@ Every setting is an environment variable, and every one has a default.
 | Variable | Used by | Default |
 |---|---|---|
 | `OPENROUTER_API_KEY` | all | falls back to OpenCode's auth store, then `.env` |
+| `DEEPSEEK_API_KEY` | `server.py` | unset — only needed for the `deepseek-v4-flash` picker option |
 | `PROMPTX_MODEL` | `main.py` | `google/gemini-2.5-flash-lite` |
 | `PROMPTX_LOCAL_URL` | `main.py`, `web.py` | `http://10.0.4.93:11434/v1/chat/completions` |
 | `PROMPTX_LOCAL_MODEL` | `main.py`, `web.py` | `qwen3.6-uncensored:latest` |
@@ -326,6 +327,11 @@ Note the naming split: `server.py` uses `SPARK_*` while the other two use
 If none of those turn up a key, you get an error naming all three options.
 The key is never logged, never echoed, and never included in an error message.
 
+`server.py` knows one more key: `DEEPSEEK_API_KEY` (environment or the same
+`.env` file), used only by the `deepseek-v4-flash` option, which calls
+`api.deepseek.com` directly instead of routing through OpenRouter. Separate
+key, separate billing — deliberately.
+
 ---
 
 ## Request parameters
@@ -335,7 +341,7 @@ Not configurable without editing the source, but worth knowing:
 | Parameter | Value | Why |
 |---|---|---|
 | `temperature` | `0.3` | Low. You want a consistent format, not creative variety. |
-| `max_tokens` | `2400` | The system prompt asks for under 250 words; 2400 leaves headroom for deep-map work orders without inviting an essay. A `length` finish reason appends an explicit cut-off warning. |
+| `max_tokens` | `2400` | The system prompt asks for under 250 words; 2400 leaves headroom for deep-map work orders without inviting an essay. A `length` finish reason appends an explicit cut-off warning. Reasoning models (`deepseek-v4-flash`) get 6,000 — a thinking model can spend the whole 2,400 budget before it emits anything. |
 | `timeout` | 180s | Generous — a cold model on a loaded local box can be slow. |
 
 `HTTP-Referer` and `X-Title` headers are sent to OpenRouter for attribution.

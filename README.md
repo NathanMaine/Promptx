@@ -216,6 +216,7 @@ tokens, fast, and it never leaks reasoning traces into the output.
 | `google/gemini-2.5-flash-lite` | $0.10/M | The default. Balanced and clean. |
 | `qwen/qwen3.7-flash` | $0.03/M | Cheapest paid option, 1M context — good for very large project trees. |
 | `qwen/qwen3.8-max` | $2/M in · $6/M out | Flagship Qwen, 1M context — for huge scanned maps where the cheap tier drops structure. |
+| `deepseek-v4-flash` | $0.14/M in · $0.28/M out | DeepSeek direct (hosted picker): 1M-context reasoning model with its own key and a bigger token budget. |
 | `meta-llama/llama-3.1-8b-instruct` | $0.05/M | Rigid and literal. Use when you already know exactly what you want. |
 | `inclusionai/ling-3.0-flash:free` | free | Rate limited, but fine for occasional use. |
 | `anthropic/claude-haiku-4.5` | ~$1/M | Catches the things you did *not* say. Worth the money on a gnarly refactor. |

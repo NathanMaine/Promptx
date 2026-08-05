@@ -34,6 +34,8 @@ a NAS Python you do not control is still good enough.
 ```bash
 ssh nas 'cat > /volume1/Projects/promptx/.env' <<'EOF'
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
+# optional — enables the deepseek-v4-flash option in the picker
+# DEEPSEEK_API_KEY=sk-your-deepseek-key
 EOF
 ssh nas 'chmod 600 /volume1/Projects/promptx/.env'
 ```

@@ -24,6 +24,15 @@ They fail in three ways at once:
 
 Cheap, fast, and literal wins. This is a rewriting task.
 
+**The one sanctioned exception: `deepseek-v4-flash`** in the hosted picker.
+The anti-reasoning rule above bends when the model is cheap *and* carries a
+1M window: V4 Flash is a 284B mixture-of-experts (13B active) at $0.14/M in.
+Because it thinks before writing, `server.py` gives it a 6,000-token budget
+instead of the usual 2,400 — at the normal cap a thinking model can spend its
+entire budget before emitting anything, and the work order comes back empty.
+It uses a dedicated `DEEPSEEK_API_KEY`, deliberately not OpenRouter, so
+billing and rate limits stay independent.
+
 ## The lineup
 
 | Model | Cost/M in | Character |
@@ -31,6 +40,7 @@ Cheap, fast, and literal wins. This is a rewriting task.
 | `google/gemini-2.5-flash-lite` | $0.10 | **Default.** Fast, clean numbered steps, never leaks traces. Best all-rounder. |
 | `qwen/qwen3.7-flash` | $0.03 | Cheapest paid, 1M context. Formatting slightly less tidy. |
 | `qwen/qwen3.8-max` | $2 (out: $6) | Flagship Qwen, 1M context. For huge scanned maps where the cheap tier drops structure. |
+| `deepseek-v4-flash` | $0.14 (out: $0.28) | DeepSeek direct — 1M-context reasoning model. The sanctioned exception, below. Hosted picker only. |
 | `meta-llama/llama-3.1-8b-instruct` | $0.05 | Rigid. Follows the template, adds nothing. Weakest at inferring what you left out. |
 | `inclusionai/ling-3.0-flash:free` | free | Fine for the task; rate limits bite under real use. |
 | `anthropic/claude-haiku-4.5` | ~$1 | Best at catching what you did *not* say. |

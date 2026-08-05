@@ -3,6 +3,16 @@
 Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 [docs/FIELD-NOTES.md](docs/FIELD-NOTES.md); this is the summary.
 
+## Unreleased
+
+### Added
+- Upstream of the DeepSeek direct integration that shipped NAS-only in 0.2.0:
+  `deepseek-v4-flash` in the hosted picker, `DEEPSEEK_API_KEY` (env or
+  `.env`), dedicated `api.deepseek.com` endpoint, and a 6,000-token budget so
+  the reasoning model has room to think *and* answer. Now documented in
+  `models.md`, `documentation.md`, and `.env.example` so a redeploy from the
+  repo alone carries it.
+
 ## 0.2.0 — 2026-08-05
 
 First numbered release — everything under the old "Unreleased" heading ships
