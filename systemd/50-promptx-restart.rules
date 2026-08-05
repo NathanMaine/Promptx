@@ -1,0 +1,18 @@
+// Allow the service user to start/stop/restart promptx.service without a
+// password, so promptx updates do not need root. Scoped to this unit and this
+// user only — nothing else is opened up.
+//
+// Install (needs root once):
+//   cp systemd/50-promptx-restart.rules /etc/polkit-1/rules.d/
+//   chown root:root /etc/polkit-1/rules.d/50-promptx-restart.rules
+//   chmod 644 /etc/polkit-1/rules.d/50-promptx-restart.rules
+//
+// polkit picks up new rules automatically — no reboot, no service reload.
+// If your service user is not "Natron", edit the subject.user line.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "promptx.service" &&
+        subject.user === "Natron") {
+        return polkit.Result.YES;
+    }
+});

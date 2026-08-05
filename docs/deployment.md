@@ -190,6 +190,17 @@ ssh nas '
   curl -s http://localhost:7331/api/version'
 ```
 
+If that `sudo` asks for a password every time, install the polkit rule once
+(needs root one last time): copy
+[`systemd/50-promptx-restart.rules`](../systemd/50-promptx-restart.rules) to
+`/etc/polkit-1/rules.d/`, root-owned, mode 644. It lets the service user
+restart exactly this unit and nothing else — updates become self-serve after
+that. Note it is scoped by username (`Natron` in the shipped rule).
+
+A deployed-by-copy box without git: copy the changed files in by hand (the
+`cat | ssh` pipe from step 1 — scp fails on some NAS SSH configs), keeping the
+deployed filename (`promptx-server.py`, not `server.py`).
+
 ### Rolling back
 
 The version is one file. To roll back, check out the previous tag

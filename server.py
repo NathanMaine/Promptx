@@ -29,6 +29,9 @@ except ImportError:
     VERSION = "unknown"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# DeepSeek direct, using its own dedicated key rather than routing through
+# OpenRouter. Same OpenAI-compatible shape; context caching is automatic.
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 SPARK_URL = os.getenv("PROMPTX_SPARK_URL", "http://10.0.4.93:11434/v1/chat/completions")
 SPARK_MODEL = os.getenv("PROMPTX_SPARK_MODEL", "qwen3.6-uncensored:latest")
 ENV_FILE = pathlib.Path(os.getenv("PROMPTX_ENV", "/volume1/Projects/promptx/.env"))
@@ -76,6 +79,13 @@ MODELS = [
      "Noticeably better at catching what you did NOT say — missing dependencies, "
      "ordering problems, edge cases. Worth the extra cost for gnarly multi-file "
      "refactors where a bad plan wastes an hour."),
+    ("deepseek-v4-flash", "DeepSeek V4 Flash", "$0.14/M",
+     "Best value · 1M context",
+     "Beats DeepSeek's own larger V4-Pro on all nine of their published agent and "
+     "coding benchmarks (Terminal Bench 82.7 vs 72.1) at a third of its price. "
+     "284B mixture-of-experts, 13B active, 1M context. Uses a dedicated DeepSeek "
+     "key, not OpenRouter. It is a reasoning model, so it thinks before it writes "
+     "and gets a larger token budget here. $0.14 in / $0.28 out per 1M."),
     ("__local__", "Spark (local)", "free",
      "Runs on your own hardware",
      "Uses the DGX Spark's own model. Nothing leaves the building and it costs "
@@ -154,6 +164,23 @@ def api_key():
             for line in ENV_FILE.read_text().splitlines():
                 line = line.strip()
                 if line.startswith("OPENROUTER_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            pass
+    return None
+
+
+def deepseek_key():
+    """DeepSeek's own key. Deliberately separate from the OpenRouter key so
+    DeepSeek billing and rate limits stay independent."""
+    k = os.getenv("DEEPSEEK_API_KEY")
+    if k:
+        return k
+    if ENV_FILE.exists():
+        try:
+            for line in ENV_FILE.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("DEEPSEEK_API_KEY="):
                     return line.split("=", 1)[1].strip().strip('"').strip("'")
         except OSError:
             pass
@@ -241,18 +268,25 @@ def expand(request, model, ctx_dir):
                 f"agent to create it first.")
 
     local = model == "__local__"
+    deepseek = model.startswith("deepseek-")
+    # Reasoning models spend part of the completion budget thinking before they
+    # emit anything; at 2400 the answer can come back empty.
     payload = {"model": SPARK_MODEL if local else model,
                "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                             {"role": "user", "content": user}],
-               "temperature": 0.3, "max_tokens": 2400}
+               "temperature": 0.3, "max_tokens": 6000 if deepseek else 2400}
     headers = {"Content-Type": "application/json"}
-    url = SPARK_URL if local else OPENROUTER_URL
+    url = SPARK_URL if local else (DEEPSEEK_URL if deepseek else OPENROUTER_URL)
     if not local:
-        key = api_key()
+        key = deepseek_key() if deepseek else api_key()
         if not key:
-            return None, "No OpenRouter key configured on the NAS. Pick the Spark model, or add the key to /volume1/Projects/promptx/.env"
+            which = "DeepSeek" if deepseek else "OpenRouter"
+            var = "DEEPSEEK_API_KEY" if deepseek else "OPENROUTER_API_KEY"
+            return None, (f"No {which} key configured on the NAS. Pick another model, or add "
+                          f"{var} to /volume1/Projects/promptx/.env")
         headers["Authorization"] = f"Bearer {key}"
-        headers["HTTP-Referer"] = "http://10.0.4.88:8888"
+        if not deepseek:
+            headers["HTTP-Referer"] = "http://10.0.4.88:8888"
         headers["X-Title"] = "promptx"
 
     try:
