@@ -45,6 +45,31 @@ fraction of a cent per request.
 
 ---
 
+## New in 0.2.0 — built for the big repos
+
+The tool that started with a 400-file ceiling and one cheap model just grew
+teeth:
+
+- **Huge projects are in scope now.** `--scan` indexes **2,000 files by
+  default** — five times the old cap — and renders ~60K tokens of structure.
+  Both limits are env overrides (`PROMPTX_MAX_FILES`,
+  `PROMPTX_MAX_RENDER_CHARS`) for when your monorepo laughs at 2,000. Even
+  without scanning, the expander now sees **600 paths instead of 120**.
+- **Two heavyweights joined the cheap fleet.** `qwen/qwen3.8-max` — flagship
+  Qwen with a 1M context window, for maps so big the flash tier loses the
+  plot. And `deepseek-v4-flash`, billed direct by DeepSeek: 284B MoE, 1M
+  context, $0.14/M, with its own key and a thinking-sized token budget.
+- **You can see what's running.** Every surface carries the version:
+  `promptx --version`, both web UI footers, the server's startup log, and
+  `GET /api/version`. No more wondering which copy the NAS is actually
+  serving.
+- **Docker deployment where the image IS the version.** Tagged
+  `promptx:0.2.0`, hardened by default: read-only rootfs, read-only project
+  mounts, no-new-privileges, keys never touching the filesystem. Update or
+  roll back with one `docker compose up -d`.
+
+---
+
 ## Install
 
 ```bash
@@ -133,6 +158,12 @@ signatures, and docstrings. Per document: the heading outline. That is ~50
 tokens per file instead of ~4,000, so a whole project fits in a few thousand
 tokens. Full contents would blow past any context window and cost real money on
 every call.
+
+Since 0.2.0 the map holds **2,000 files by default** and renders up to ~60K
+tokens — big enough for most real codebases out of the box. Bigger still is
+one export away — `PROMPTX_MAX_FILES=5000 PROMPTX_MAX_RENDER_CHARS=500000
+promptx -c . --scan` — paired with a 1M-context expander like `qwen3.8-max`,
+which exists precisely for the result.
 
 The map is cached as JSON under `~/.promptx/index/`. Re-running `--scan` after
 editing two files re-reads two files — everything else is matched by size and
@@ -225,7 +256,9 @@ tokens, fast, and it never leaks reasoning traces into the output.
 
 **Avoid reasoning models.** This is one-shot rewriting, not a problem to solve.
 Reasoning models burn tokens thinking about it and leak traces into the output.
-Cheap and literal wins.
+Cheap and literal wins. (One sanctioned exception — `deepseek-v4-flash`, cheap
+enough and carrying a 1M window — earns a bigger budget instead. The reasoning
+behind that exception is below, in the longer comparison.)
 
 Longer comparison in [docs/models.md](docs/models.md).
 
@@ -251,6 +284,7 @@ you catch in an hour.
 | [main.py](main.py) | The CLI. Installed as `promptx`. |
 | [web.py](web.py) | Local browser UI. Installed as `promptx-web`. |
 | [server.py](server.py) | The hosted version — multi-user, model descriptions, history. |
+| [Dockerfile](Dockerfile) + [docker-compose.yml](docker-compose.yml) | The hosted deployment, containerized — the image tag carries the version. |
 | [promptx_index.py](promptx_index.py) | The structural indexer behind `--scan`. |
 | [promptx_version.py](promptx_version.py) + [VERSION](VERSION) | Which release this is — shown by `--version`, in the UI footers, and at `GET /api/version`. |
 | [install.sh](install.sh) | Installer. |
