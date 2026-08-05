@@ -1,0 +1,48 @@
+# promptx — hosted prompt expander, containerized.
+#
+#   docker compose up -d                    # start (or switch to the image tag below)
+#   curl -s localhost:7331/api/version      # confirm what is running
+#
+# Update:  build the new tag, bump `image:` below, `docker compose up -d`.
+# Rollback: point `image:` back at the previous tag, `docker compose up -d`.
+#
+# EXACTLY ONE autostart mechanism may hold port 7331. If promptx.service
+# (systemd) is still enabled on this box, stop and disable it before bringing
+# this up — see docs/deployment.md.
+
+services:
+  promptx:
+    image: promptx:0.2.0
+    build:
+      context: .
+      args:
+        VERSION: "0.2.0"
+    container_name: promptx
+    # Match the owner of the bind-mounted files on the NAS (Natron:admin),
+    # so the scanner can read projects and the index volume stays writable.
+    user: "1000:10"
+    ports:
+      - "7331:7331"
+    # Keys enter as environment variables only — the file itself never lands
+    # in the image or the container's filesystem.
+    env_file:
+      - .env
+    volumes:
+      # The structural index, carried across image updates untouched.
+      - ./.index:/app/.index
+      # Everything the scanner and folder picker may see — READ-ONLY. The
+      # server never writes to projects, and safe_root() already restricts
+      # the API to exactly these paths.
+      - /volume1/Projects:/volume1/Projects:ro
+      - /volume1/@home/Natron:/volume1/@home/Natron:ro
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:7331/api/version',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

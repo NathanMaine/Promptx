@@ -158,29 +158,44 @@ Check it **after** every update — it is the only proof the box you reached is
 running the code you sent. (Same trap as the dashboard tile: a file that
 changed on disk is not necessarily the file being served.)
 
-### Docker (bind-mounted project dir)
+### Docker (recommended — the image IS the version)
 
-The container bind-mounts the project at `/app`, so the code lives on the NAS
-disk — update the files, restart the container, done. The `.index` cache and
-`.env` sit in the same mount and survive untouched.
+Since 0.2.0 the hosted server ships with a `Dockerfile` and
+`docker-compose.yml`. The code is baked into a tagged image
+(`promptx:0.2.0`, `promptx:0.3.0`, …), so there are no files to hand-copy and
+no NAS-local drift to merge — update and rollback are both just "point at a
+different tag." Keys enter via `env_file`, the index persists via a volume,
+and the project mounts are **read-only**.
+
+First run (on the box that runs Docker):
 
 ```bash
-ssh nas '
-  cd /volume1/Projects/promptx
-  git pull                                     # if deployed as a clone
-  docker restart promptx                       # or your container name
-  sleep 2
-  curl -s http://localhost:7331/api/version'
+cd /volume1/Projects/promptx          # or wherever this repo lives
+docker build --build-arg VERSION="$(cat VERSION)" -t "promptx:$(cat VERSION)" .
+docker compose up -d
+curl -s localhost:7331/api/version    # {"version": "0.2.0"}
 ```
 
-Deployed by file-copy instead of git? Copy the changed files the same way as
-step 1 — for 0.2.0 that is `server.py`, `promptx_index.py`,
-`promptx_version.py`, and `VERSION` — then restart the container.
+If the unit `promptx.service` also exists on this box, stop and disable it
+first — exactly one autostart mechanism may hold the port.
 
-`git pull` reports up-to-date but the version did not change: the mount is not
-what you think it is. `docker inspect promptx --format
-'{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'` shows
-what is actually bind-mounted at `/app`.
+Update, later:
+
+```bash
+# get the new release onto the box (git pull, or copy the repo files in),
+# then:
+docker build --build-arg VERSION="$(cat VERSION)" -t "promptx:$(cat VERSION)" .
+# bump the image: line in docker-compose.yml to the new tag, then:
+docker compose up -d
+curl -s localhost:7331/api/version
+```
+
+Rollback: put the old tag back in `image:` and `docker compose up -d`. The
+old image stays around until you `docker rmi` it — keep the last two.
+
+Compose also adds a healthcheck against `/api/version`, `read_only` rootfs,
+and `no-new-privileges` — an unauthenticated LAN server should be the most
+boxed-in thing on the box.
 
 ### systemd
 

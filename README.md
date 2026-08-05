@@ -101,9 +101,10 @@ compare two phrasings side by side.
 
 Run `server.py` on a NAS or any always-on box and it's a bookmark from your
 phone, your laptop, anywhere on the LAN. See
-[docs/deployment.md](docs/deployment.md) — it includes a systemd unit, because
-`nohup` does not survive a reboot and you will forget that it was running under
-`nohup`.
+[docs/deployment.md](docs/deployment.md) — it covers the recommended Docker
+deployment (the image carries the version; updates and rollbacks are one
+`docker compose up -d`), plus a systemd unit, because `nohup` does not
+survive a reboot and you will forget that it was running under `nohup`.
 
 ---
 

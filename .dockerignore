@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+.env
+.env.example
+docs/
+systemd/
+scripts/
+*.bak*
+__pycache__/
+Dockerfile
+docker-compose.yml
+.dockerignore
+main.py
+web.py
+install.sh

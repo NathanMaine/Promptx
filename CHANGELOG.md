@@ -6,6 +6,11 @@ Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 ## Unreleased
 
 ### Added
+- Docker deployment: `Dockerfile` + `docker-compose.yml`. The image is tagged
+  with the VERSION file, so updates and rollbacks are tag swaps — no
+  hand-copied files, no NAS-local drift to merge. Compose runs the container
+  read-only with no-new-privileges, read-only project mounts, keys via
+  `env_file`, the index on a volume, and a healthcheck on `/api/version`.
 - Upstream of the DeepSeek direct integration that shipped NAS-only in 0.2.0:
   `deepseek-v4-flash` in the hosted picker, `DEEPSEEK_API_KEY` (env or
   `.env`), dedicated `api.deepseek.com` endpoint, and a 6,000-token budget so
