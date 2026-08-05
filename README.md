@@ -252,7 +252,7 @@ tokens, fast, and it never leaks reasoning traces into the output.
 | `meta-llama/llama-3.1-8b-instruct` | $0.05/M | Rigid and literal. Use when you already know exactly what you want. |
 | `inclusionai/ling-3.0-flash:free` | free | Rate limited, but fine for occasional use. |
 | `anthropic/claude-haiku-4.5` | ~$1/M | Catches the things you did *not* say. Worth the money on a gnarly refactor. |
-| `--local` | free | Your own hardware. Verbose, and emits `<think>` traces that get stripped. |
+| `--local` | free | Your own hardware — the hosted picker has both engines: vLLM (quicker) and Ollama (always loaded). Verbose, `<think>` traces get stripped. |
 
 **Avoid reasoning models.** This is one-shot rewriting, not a problem to solve.
 Reasoning models burn tokens thinking about it and leak traces into the output.

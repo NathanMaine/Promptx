@@ -48,14 +48,25 @@ to more people than a laptop home directory.
 
 ## 3. Point it at your own hardware (optional)
 
-For the free local option in the picker:
+The hosted picker carries **two** free local options, one per engine on the
+box — pick per request:
 
 ```bash
+# "Spark (local · Ollama)" — always loaded, the reliable fallback
 PROMPTX_SPARK_URL=http://10.0.4.93:11434/v1/chat/completions
 PROMPTX_SPARK_MODEL=qwen3.6-uncensored:latest
+
+# "Spark (local · vLLM)" — quicker, but serves ONE model at a time
+PROMPTX_SPARK_VLLM_URL=http://10.0.4.93:8000/v1/chat/completions
+PROMPTX_SPARK_VLLM_MODEL=sakamakismile/KAT-Coder-V2.5-Dev-NVFP4
 ```
 
-Any OpenAI-compatible endpoint works — Ollama, vLLM, LM Studio.
+vLLM is the faster engine on the same hardware; the catch is that
+`PROMPTX_SPARK_VLLM_MODEL` must match whatever model vLLM currently has
+loaded (`curl -s http://<spark>:8000/v1/models` shows it). Swap models on
+the box, swap the env var — or just pick the Ollama option, which is always
+there. Any OpenAI-compatible endpoint works in either slot: Ollama, vLLM,
+LM Studio.
 
 ---
 

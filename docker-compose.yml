@@ -12,11 +12,11 @@
 
 services:
   promptx:
-    image: promptx:0.2.0
+    image: promptx:0.3.0
     build:
       context: .
       args:
-        VERSION: "0.2.0"
+        VERSION: "0.3.0"
     container_name: promptx
     # Match the owner of the bind-mounted files on the NAS (Natron:admin),
     # so the scanner can read projects and the index volume stays writable.

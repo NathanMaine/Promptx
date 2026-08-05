@@ -34,6 +34,11 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 SPARK_URL = os.getenv("PROMPTX_SPARK_URL", "http://10.0.4.93:11434/v1/chat/completions")
 SPARK_MODEL = os.getenv("PROMPTX_SPARK_MODEL", "qwen3.6-uncensored:latest")
+# The same box, quicker engine. vLLM serves one model at a time, so this
+# must match whatever is currently loaded — override it in .env when you
+# swap models.
+SPARK_VLLM_URL = os.getenv("PROMPTX_SPARK_VLLM_URL", "http://10.0.4.93:8000/v1/chat/completions")
+SPARK_VLLM_MODEL = os.getenv("PROMPTX_SPARK_VLLM_MODEL", "sakamakismile/KAT-Coder-V2.5-Dev-NVFP4")
 ENV_FILE = pathlib.Path(os.getenv("PROMPTX_ENV", "/volume1/Projects/promptx/.env"))
 PROJECT_ROOTS = ["/volume1/Projects", "/volume1/@home/Natron"]
 # The container bind-mounts this project at /app, so /app/.index and
@@ -86,11 +91,19 @@ MODELS = [
      "284B mixture-of-experts, 13B active, 1M context. Uses a dedicated DeepSeek "
      "key, not OpenRouter. It is a reasoning model, so it thinks before it writes "
      "and gets a larger token budget here. $0.14 in / $0.28 out per 1M."),
-    ("__local__", "Spark (local)", "free",
-     "Runs on your own hardware",
-     "Uses the DGX Spark's own model. Nothing leaves the building and it costs "
-     "nothing, but it emits &lt;think&gt; reasoning traces and is more verbose. "
-     "Use it for sensitive work or when you are offline from the cloud."),
+    ("__local_vllm__", "Spark (local · vLLM)", "free",
+     "Fastest local option",
+     "Runs on the DGX Spark's vLLM server — noticeably quicker than Ollama on "
+     "the same hardware. One model is live at a time: this option targets "
+     "PROMPTX_SPARK_VLLM_MODEL, so if a different model is loaded the call "
+     "fails — point the env var at it, or pick the Ollama option instead. "
+     "Nothing leaves the building and it costs nothing."),
+    ("__local__", "Spark (local · Ollama)", "free",
+     "Always-available local option",
+     "Uses the DGX Spark's Ollama model. Always loaded, so it works even when "
+     "vLLM is serving something else or is down. Nothing leaves the building "
+     "and it costs nothing, but it emits &lt;think&gt; reasoning traces and is more "
+     "verbose. Use it for sensitive work or when you are offline from the cloud."),
 ]
 
 SYSTEM = """You rewrite vague software requests into explicit work orders for a \
@@ -267,16 +280,17 @@ def expand(request, model, ctx_dir):
                 f"is missing from the tree, say so explicitly and instruct the "
                 f"agent to create it first.")
 
-    local = model == "__local__"
+    local = model in ("__local__", "__local_vllm__")
+    vllm = model == "__local_vllm__"
     deepseek = model.startswith("deepseek-")
     # Reasoning models spend part of the completion budget thinking before they
     # emit anything; at 2400 the answer can come back empty.
-    payload = {"model": SPARK_MODEL if local else model,
+    payload = {"model": (SPARK_VLLM_MODEL if vllm else SPARK_MODEL) if local else model,
                "messages": [{"role": "system", "content": SYSTEM_DEEP if deep else SYSTEM},
                             {"role": "user", "content": user}],
                "temperature": 0.3, "max_tokens": 6000 if deepseek else 2400}
     headers = {"Content-Type": "application/json"}
-    url = SPARK_URL if local else (DEEPSEEK_URL if deepseek else OPENROUTER_URL)
+    url = (SPARK_VLLM_URL if vllm else SPARK_URL) if local else (DEEPSEEK_URL if deepseek else OPENROUTER_URL)
     if not local:
         key = deepseek_key() if deepseek else api_key()
         if not key:

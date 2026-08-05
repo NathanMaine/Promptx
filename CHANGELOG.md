@@ -3,9 +3,15 @@
 Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 [docs/FIELD-NOTES.md](docs/FIELD-NOTES.md); this is the summary.
 
-## Unreleased
+## 0.3.0 — 2026-08-05
 
 ### Added
+- Two local engines in the hosted picker, so you can choose per request:
+  **Spark (local · vLLM)** — the quicker path, one model live at a time —
+  and **Spark (local · Ollama)**, the always-loaded fallback. Each has its
+  own endpoint/model env vars (`PROMPTX_SPARK_VLLM_URL` /
+  `PROMPTX_SPARK_VLLM_MODEL` alongside the existing `PROMPTX_SPARK_*`).
+  Both stay free and on-LAN.
 - Docker deployment: `Dockerfile` + `docker-compose.yml`. The image is tagged
   with the VERSION file, so updates and rollbacks are tag swaps — no
   hand-copied files, no NAS-local drift to merge. Compose runs the container

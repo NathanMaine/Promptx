@@ -309,6 +309,8 @@ Every setting is an environment variable, and every one has a default.
 | `PROMPTX_LOCAL_MODEL` | `main.py`, `web.py` | `qwen3.6-uncensored:latest` |
 | `PROMPTX_SPARK_URL` | `server.py` | same as above |
 | `PROMPTX_SPARK_MODEL` | `server.py` | same as above |
+| `PROMPTX_SPARK_VLLM_URL` | `server.py` | `http://10.0.4.93:8000/v1/chat/completions` — the quicker vLLM engine |
+| `PROMPTX_SPARK_VLLM_MODEL` | `server.py` | whatever vLLM currently serves — must match, or the call fails |
 | `PROMPTX_ENV` | `server.py` | `/volume1/Projects/promptx/.env` |
 | `PROMPTX_INDEX_DIR` | all | `~/.promptx/index` locally, `/app/.index` hosted |
 | `PROMPTX_MAX_FILES` | indexer | `2000` — files recorded in a `--scan` index |
