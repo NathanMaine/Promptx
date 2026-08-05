@@ -3,7 +3,40 @@
 Notable changes. Bug detail — symptom, diagnosis, fix — lives in
 [docs/FIELD-NOTES.md](docs/FIELD-NOTES.md); this is the summary.
 
-## Unreleased
+## 0.2.0 — 2026-08-05
+
+First numbered release — everything under the old "Unreleased" heading ships
+with it, plus the below.
+
+### Added
+- `qwen/qwen3.8-max` as an expander option in all three UIs — flagship Qwen
+  with a 1M context window, for huge scanned maps where the cheap tier drops
+  structure ($2/M in, $6/M out).
+- Versioning. `VERSION` file + `promptx_version.py`: shown by
+  `promptx --version`, in both web UI footers, in the hosted server's startup
+  log, and at `GET /api/version` — so you can tell which release a NAS
+  container is running without opening it. `install.sh` ships both files.
+- `docs/deployment.md` — "Updating a running install": the Docker
+  bind-mount-at-/app flow, version check, rollback.
+
+### Changed
+- File limits raised for large projects: index default 400 → **2,000 files**,
+  rendered map 60K → **240K characters** (~60K tokens). Both are now env
+  overrides — `PROMPTX_MAX_FILES`, `PROMPTX_MAX_RENDER_CHARS` — so huge repos
+  paired with a 1M-context expander can go further still.
+- Name-only trees (`-c` without `--scan`) 120/150 → **600 paths** in all
+  three apps.
+- Browser-side scanner cap 400 → 2,000, matching the CLI default; pushed-index
+  upload limit 4 MB → 8 MB.
+
+### Fixed
+- Scanner parity: the browser scanner skipped `.env` config outlines the CLI
+  recorded, and the CLI lacked the browser's `Pods`/`DerivedData` skips. Both
+  sets now match.
+- Stale docs: the request-parameters table still said `max_tokens: 900`; it
+  has been 2400 since the truncation fix.
+
+## Unreleased (shipped as 0.2.0)
 
 ### Added
 - Structural indexing (`promptx_index.py`). Sends signatures, docstrings, and

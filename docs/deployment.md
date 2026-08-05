@@ -142,6 +142,62 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.0.4.88:7331/
 
 ---
 
+## Updating a running install
+
+Every release carries a version — `VERSION` at the repo root, shown by
+`promptx --version`, in the footer of both web UIs, in the server's startup
+log line, and at `GET /api/version`.
+
+```bash
+curl -s http://10.0.4.88:7331/api/version    # {"version": "0.2.0"}
+```
+
+Check it **after** every update — it is the only proof the box you reached is
+running the code you sent. (Same trap as the dashboard tile: a file that
+changed on disk is not necessarily the file being served.)
+
+### Docker (bind-mounted project dir)
+
+The container bind-mounts the project at `/app`, so the code lives on the NAS
+disk — update the files, restart the container, done. The `.index` cache and
+`.env` sit in the same mount and survive untouched.
+
+```bash
+ssh nas '
+  cd /volume1/Projects/promptx
+  git pull                                     # if deployed as a clone
+  docker restart promptx                       # or your container name
+  sleep 2
+  curl -s http://localhost:7331/api/version'
+```
+
+Deployed by file-copy instead of git? Copy the changed files the same way as
+step 1 — for 0.2.0 that is `server.py`, `promptx_index.py`,
+`promptx_version.py`, and `VERSION` — then restart the container.
+
+`git pull` reports up-to-date but the version did not change: the mount is not
+what you think it is. `docker inspect promptx --format
+'{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'` shows
+what is actually bind-mounted at `/app`.
+
+### systemd
+
+```bash
+ssh nas '
+  cd /volume1/Projects/promptx && git pull
+  sudo systemctl restart promptx
+  sleep 2
+  curl -s http://localhost:7331/api/version'
+```
+
+### Rolling back
+
+The version is one file. To roll back, check out the previous tag
+(`git checkout v0.1.0 -- .` style, or copy the old files back) and restart —
+the index cache is forward-compatible either way.
+
+---
+
 ## Security
 
 **There is no authentication.** Anyone who can reach the port can spend your

@@ -44,6 +44,11 @@ try:
 except ImportError:
     promptx_index = None
 
+try:
+    from promptx_version import VERSION
+except ImportError:
+    VERSION = "unknown"
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("PROMPTX_MODEL", "google/gemini-2.5-flash-lite")
 LOCAL_URL = os.getenv("PROMPTX_LOCAL_URL", "http://10.0.4.93:11434/v1/chat/completions")
@@ -55,6 +60,7 @@ HOSTED_URL = os.getenv("PROMPTX_HOSTED_URL", "http://10.0.4.88:7331")
 SUGGESTED = [
     ("google/gemini-2.5-flash-lite", "$0.10/M — fast, clean output. Default."),
     ("qwen/qwen3.7-flash", "$0.03/M — cheapest non-free, 1M context"),
+    ("qwen/qwen3.8-max", "$2/M in · $6/M out — flagship Qwen, 1M context; huge scanned maps"),
     ("meta-llama/llama-3.1-8b-instruct", "$0.05/M — small and literal"),
     ("inclusionai/ling-3.0-flash:free", "free tier — fine for this, rate limited"),
     ("anthropic/claude-haiku-4.5", "pricier, best instruction-following if it matters"),
@@ -131,7 +137,7 @@ def api_key():
         "  or use --local to run against the Spark instead.")
 
 
-def repo_context(root, max_files=120):
+def repo_context(root, max_files=600):
     """Compact file tree so the expander names real paths, not invented ones."""
     root = pathlib.Path(root).resolve()
     skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
@@ -293,6 +299,8 @@ def main():
     ap.add_argument("--copy", action="store_true", help="copy result to clipboard")
     ap.add_argument("--raw", action="store_true", help="no header, just the prompt")
     ap.add_argument("--models", action="store_true", help="show suggested models")
+    ap.add_argument("--version", action="version", version=f"promptx {VERSION}",
+                    help="show which promptx this is and exit")
     ap.add_argument("--scan", action="store_true",
                     help="index -c DIR so it can answer questions about the code, "
                          "not just name paths (incremental: only changed files)")

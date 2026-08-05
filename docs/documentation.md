@@ -196,9 +196,11 @@ Per file, from `promptx_index.py`:
 | anything else | path and size |
 
 Roughly 50 tokens per file against ~4,000 for full source. A 14-file project
-renders to about 1,700 tokens; the render is capped at 60,000 characters
-(~15K tokens) and 400 files, with documentation emitted before code so doc
-outlines survive truncation.
+renders to about 1,700 tokens. The render is capped at 240,000 characters
+(~60K tokens) and 2,000 files by default — both configurable via
+`PROMPTX_MAX_RENDER_CHARS` and `PROMPTX_MAX_FILES` for huge repos paired with
+a 1M-context expander. Documentation is emitted before code so doc outlines
+survive truncation.
 
 ### Caching and refresh
 
@@ -231,6 +233,7 @@ docstring show, and must instruct the agent to read that specific file first.
 | `POST /api/scan` `{dir, force}` | Index a folder **on the server**. Goes through `safe_root`. |
 | `POST /api/index` `{root, files, …}` | Store an index built elsewhere. See below. |
 | `GET /api/folders` | Pickable folders, each flagged indexed or not. |
+| `GET /api/version` | The running promptx version — check it after updating the NAS without opening the UI. |
 
 `deep_context()` deliberately does **not** go through `safe_root`. An index is
 inert data that was already built; rendering it touches no filesystem. That is
@@ -238,7 +241,7 @@ precisely what lets a laptop push a map for `/Users/you/project` and then expand
 against it from a phone — the server never needs to see those files.
 
 `POST /api/index` has the same trust model as the rest of the hosted server:
-none. Anyone on the LAN can store an index. Payloads over 4 MB are rejected.
+none. Anyone on the LAN can store an index. Payloads over 8 MB are rejected.
 Keep it on the LAN.
 
 ## Verifying what the agent actually did
@@ -307,6 +310,8 @@ Every setting is an environment variable, and every one has a default.
 | `PROMPTX_SPARK_MODEL` | `server.py` | same as above |
 | `PROMPTX_ENV` | `server.py` | `/volume1/Projects/promptx/.env` |
 | `PROMPTX_INDEX_DIR` | all | `~/.promptx/index` locally, `/app/.index` hosted |
+| `PROMPTX_MAX_FILES` | indexer | `2000` — files recorded in a `--scan` index |
+| `PROMPTX_MAX_RENDER_CHARS` | indexer | `240000` — rendered map size (~60K tokens) |
 | `PROMPTX_HOSTED_URL` | `main.py` (`--push`) | `http://10.0.4.88:7331` |
 
 Note the naming split: `server.py` uses `SPARK_*` while the other two use
@@ -330,7 +335,7 @@ Not configurable without editing the source, but worth knowing:
 | Parameter | Value | Why |
 |---|---|---|
 | `temperature` | `0.3` | Low. You want a consistent format, not creative variety. |
-| `max_tokens` | `900` | The system prompt asks for under 250 words; 900 leaves headroom without inviting an essay. |
+| `max_tokens` | `2400` | The system prompt asks for under 250 words; 2400 leaves headroom for deep-map work orders without inviting an essay. A `length` finish reason appends an explicit cut-off warning. |
 | `timeout` | 180s | Generous — a cold model on a loaded local box can be slow. |
 
 `HTTP-Referer` and `X-Title` headers are sent to OpenRouter for attribution.
@@ -358,7 +363,7 @@ they were part of the spec.
 | `cannot reach ...` | Network, or `--local` pointed at a box that is down. |
 | Output contains `<think>` | A model whose trace format the stripper does not recognize. Switch models. |
 | Output is an essay, not steps | A reasoning model. See [models.md](models.md). |
-| Paths in the output do not exist | You forgot `-c`, or the tree got truncated at 120 files. |
+| Paths in the output do not exist | You forgot `-c`, or the tree got truncated at 600 files — `--scan` goes much deeper. |
 
 ### On model ids specifically
 
@@ -377,8 +382,9 @@ for m in json.load(sys.stdin)["data"]:
 
 ## Limits worth knowing before you rely on it
 
-- **120 files of context** without `--scan` (400 with it). Large repos get
-  truncated alphabetically; point `-c` at a subdirectory.
+- **600 files of context** without `--scan` (2,000 with it by default; raise
+  `PROMPTX_MAX_FILES` and `PROMPTX_MAX_RENDER_CHARS` for bigger). Large repos
+  get truncated alphabetically; point `-c` at a subdirectory.
 - **Names, not contents — unless you `--scan`.** Without an index it cannot
   review code it has never read, and the system prompt tells it to say so
   rather than invent findings. With an index it sees signatures and docstrings,

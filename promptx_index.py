@@ -28,12 +28,15 @@ import re
 import subprocess
 import time
 
-# Directories that are never worth indexing.
+# Directories that are never worth indexing. Kept in sync with the SKIP_DIRS
+# set in server.py's browser-side scanner — the two scanners should not
+# disagree about what exists.
 SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
     "env", "dist", "build", ".next", "target", ".mypy_cache", ".pytest_cache",
     ".ruff_cache", ".tox", ".eggs", "site-packages", ".idea", ".vscode",
     "coverage", ".nyc_output", "vendor", ".terraform", ".gradle",
+    "Pods", "DerivedData",
 }
 
 # Files we can say something structural about.
@@ -44,11 +47,23 @@ DOC_EXT = {".md", ".markdown", ".rst", ".txt", ".adoc"}
 CONF_EXT = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env"}
 
 # Guardrails. A single enormous file should not eat the whole budget, and the
-# finished index has to stay comfortably inside a prompt.
+# finished index still has to fit the expander's prompt. The defaults suit
+# mid-sized projects; big repos can raise both — the 1M-context expanders
+# (qwen3.8-max, qwen3.7-flash) carry maps several times this size without
+# noticing.
 MAX_PARSE_BYTES = 400_000      # skip parsing anything larger
 MAX_ENTRIES_PER_FILE = 30      # signatures/headings kept per file
-MAX_FILES = 400                # files recorded in the index
-MAX_RENDER_CHARS = 60_000      # ~15K tokens once rendered into the prompt
+
+
+def _int_env(name, default):
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+MAX_FILES = _int_env("PROMPTX_MAX_FILES", 2000)                # files recorded in the index
+MAX_RENDER_CHARS = _int_env("PROMPTX_MAX_RENDER_CHARS", 240_000)  # ~60K tokens once rendered
 
 
 # --------------------------------------------------------------------------

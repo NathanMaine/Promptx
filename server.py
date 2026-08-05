@@ -23,6 +23,11 @@ try:
 except ImportError:
     promptx_index = None
 
+try:
+    from promptx_version import VERSION
+except ImportError:
+    VERSION = "unknown"
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 SPARK_URL = os.getenv("PROMPTX_SPARK_URL", "http://10.0.4.93:11434/v1/chat/completions")
 SPARK_MODEL = os.getenv("PROMPTX_SPARK_MODEL", "qwen3.6-uncensored:latest")
@@ -50,6 +55,13 @@ MODELS = [
      "A third the price of the default with a huge context window. Use it when "
      "you are pasting a very large project tree, or when you are iterating a lot "
      "and want cost near zero. Slightly less polished formatting."),
+    ("qwen/qwen3.8-max", "Qwen3.8 Max", "$2/M in · $6/M out",
+     "Flagship Qwen · 1M context",
+     "The heavyweight option: a 1M-token window with flagship-grade planning. "
+     "Use it when the scanned map is huge or the cheap tier keeps losing the "
+     "plot — big repos, tangled import graphs, multi-package changes. Costs "
+     "about 20x the default per expansion, which is still only cents. Overkill "
+     "for small, simple requests."),
     ("meta-llama/llama-3.1-8b-instruct", "Llama 3.1 8B", "$0.05/M",
      "Small and literal",
      "Follows the template rigidly and adds little of its own. Good when you "
@@ -163,7 +175,7 @@ def safe_root(p):
     return None
 
 
-def repo_context(root, max_files=150):
+def repo_context(root, max_files=600):
     rp = safe_root(root)
     if rp is None:
         return None, f"path must be under {' or '.join(PROJECT_ROOTS)}"
@@ -326,8 +338,8 @@ def store_index(payload):
     files = payload.get("files")
     if not root or not isinstance(files, dict):
         return {"error": "need root and files"}
-    if len(json.dumps(files)) > 4_000_000:
-        return {"error": "index too large (>4MB)"}
+    if len(json.dumps(files)) > 8_000_000:
+        return {"error": "index too large (>8MB)"}
 
     index = {"root": root,
              "scanned_at": int(payload.get("scanned_at") or time.time()),
@@ -496,7 +508,7 @@ footer{color:var(--muted);font-size:12.5px;margin-top:34px;border-top:1px solid 
 
 <div class="hist" id="hist" hidden><h2>Earlier</h2><div id="hlist"></div></div>
 
-<footer><b>When to use it:</b> building or changing files — anywhere the agent needs a precise spec.
+<footer><b>promptx v__VERSION__</b> · <b>When to use it:</b> building or changing files — anywhere the agent needs a precise spec.
 <b>When not to:</b> audits and code review, since promptx sees file names but not contents — ask your agent directly for those.
 Always read the expansion before running it; it commits confidently to one reading of an ambiguous request.</footer>
 
@@ -600,8 +612,8 @@ const SKIP_DIRS=new Set(['.git','.hg','.svn','node_modules','__pycache__','.venv
 const CODE_EXT=new Set(['.py','.js','.jsx','.ts','.tsx','.mjs','.cjs','.go','.rs',
   '.rb','.java','.kt','.swift','.c','.h','.cpp','.hpp','.cs','.php','.sh','.bash','.zsh']);
 const DOC_EXT=new Set(['.md','.markdown','.rst','.txt','.adoc']);
-const CONF_EXT=new Set(['.json','.yaml','.yml','.toml','.ini','.cfg']);
-const MAX_FILES=400,MAX_BYTES=400000,MAX_ENTRIES=30;
+const CONF_EXT=new Set(['.json','.yaml','.yml','.toml','.ini','.cfg','.env']);
+const MAX_FILES=2000,MAX_BYTES=400000,MAX_ENTRIES=30;
 
 function extOf(p){const i=p.lastIndexOf('.');return i<0?'':p.slice(i).toLowerCase()}
 function relOf(f){const p=f.webkitRelativePath||f.name;const i=p.indexOf('/');
@@ -807,11 +819,16 @@ class H(http.server.BaseHTTPRequestHandler):
             self._j({"folders": list_folders()})
             return
 
+        if route == "/api/version":
+            self._j({"version": VERSION})
+            return
+
         if route not in ("/", "/index.html"):
             self.send_error(404)
             return
         body = (PAGE.replace("__MODELS__", json.dumps(MODELS))
-            .replace("__ROOTS__", json.dumps(PROJECT_ROOTS))).encode()
+            .replace("__ROOTS__", json.dumps(PROJECT_ROOTS))
+            .replace("__VERSION__", VERSION)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -862,6 +879,6 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=7331)
     ap.add_argument("--host", default="0.0.0.0")
     a = ap.parse_args()
-    print(f"promptx serving on http://{a.host}:{a.port}  key={'yes' if api_key() else 'NO'}")
+    print(f"promptx v{VERSION} serving on http://{a.host}:{a.port}  key={'yes' if api_key() else 'NO'}")
     with S((a.host, a.port), H) as s:
         s.serve_forever()

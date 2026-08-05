@@ -370,6 +370,9 @@ choice is now a one-second check. An unambiguous request produces no line at
 all, verified in the same run.
 
 ### E. The browser extractor is weaker than the CLI
-Client-side scanning uses regex where the CLI uses `ast`, and caps at 400
-files. For a large repo, `promptx -c . --scan --push` from the terminal remains
-more accurate. The two should not disagree, and today they can.
+Client-side scanning uses regex where the CLI uses `ast`. Both share the same
+2,000-file default cap since 0.2.0, and the skip-dir/config-extension sets were
+re-synced then too (the browser scanner had been missing `.env` outlines; the
+CLI had been missing `Pods`/`DerivedData` skips). The ast/regex gap remains:
+for a large repo, `promptx -c . --scan --push` from the terminal is still the
+more accurate path.

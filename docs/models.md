@@ -30,6 +30,7 @@ Cheap, fast, and literal wins. This is a rewriting task.
 |---|---|---|
 | `google/gemini-2.5-flash-lite` | $0.10 | **Default.** Fast, clean numbered steps, never leaks traces. Best all-rounder. |
 | `qwen/qwen3.7-flash` | $0.03 | Cheapest paid, 1M context. Formatting slightly less tidy. |
+| `qwen/qwen3.8-max` | $2 (out: $6) | Flagship Qwen, 1M context. For huge scanned maps where the cheap tier drops structure. |
 | `meta-llama/llama-3.1-8b-instruct` | $0.05 | Rigid. Follows the template, adds nothing. Weakest at inferring what you left out. |
 | `inclusionai/ling-3.0-flash:free` | free | Fine for the task; rate limits bite under real use. |
 | `anthropic/claude-haiku-4.5` | ~$1 | Best at catching what you did *not* say. |
@@ -51,6 +52,14 @@ default is still under a cent.
 **Switch to `qwen3.7-flash` for very large trees.** The 1M context window is the
 reason, not the price.
 
+**Switch to `qwen/qwen3.8-max` when the map is huge *and* the plan matters.**
+Same 1M window as qwen3.7-flash, but flagship-grade planning on top: big
+scanned indexes, tangled import graphs, multi-package changes where a
+flash-tier model keeps losing track of what depends on what. Twenty times the
+price of the default is still cents per expansion — but it is overkill for a
+three-file fix. The pairing to know: scan with `PROMPTX_MAX_FILES` raised,
+expand with this.
+
 **Use `--local` for sensitive work.** Your request and your file tree never
 leave the LAN. The tradeoff is verbosity and reasoning traces.
 
@@ -59,9 +68,9 @@ it formatted as steps. It will not editorialize. It also will not save you.
 
 ## What the file tree costs you
 
-With `-c`, you are sending up to 120 relative paths — call it 1,500 tokens for a
-mid-sized project. At $0.10/M that is $0.00015 per expansion. Roughly seven
-thousand expansions per dollar.
+With `-c`, you are sending up to 600 relative paths — call it 7,500 tokens for a
+large project. At $0.10/M that is $0.00075 per expansion. Roughly thirteen
+hundred expansions per dollar.
 
 Do not optimize this. Use `-c` every time.
 

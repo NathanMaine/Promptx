@@ -32,9 +32,15 @@ try:
 except ImportError:
     promptx_index = None
 
+try:
+    from promptx_version import VERSION
+except ImportError:
+    VERSION = "unknown"
+
 MODELS = [
     ("google/gemini-2.5-flash-lite", "Gemini Flash Lite — fast, cheap (default)"),
     ("qwen/qwen3.7-flash", "Qwen3.7 Flash — cheapest"),
+    ("qwen/qwen3.8-max", "Qwen3.8 Max — flagship, 1M context"),
     ("meta-llama/llama-3.1-8b-instruct", "Llama 3.1 8B — small, literal"),
     ("inclusionai/ling-3.0-flash:free", "Ling 3.0 Flash — free tier"),
     ("anthropic/claude-haiku-4.5", "Claude Haiku — best instructions"),
@@ -116,7 +122,7 @@ def api_key():
     return None
 
 
-def repo_context(root, max_files=150):
+def repo_context(root, max_files=600):
     try:
         root = pathlib.Path(root).expanduser().resolve()
     except (OSError, RuntimeError):
@@ -283,7 +289,7 @@ PAGE = """<!doctype html>
 </style></head><body><div class="wrap">
 
 <h1>promptx</h1>
-<p class="sub">Turns a vague request into an explicit work order. Paste the result into your coding agent.</p>
+<p class="sub">Turns a vague request into an explicit work order. Paste the result into your coding agent. · v__VERSION__</p>
 
 <div class="card">
   <textarea id="q" placeholder="What do you want done? e.g. build out the gtm adapters package" autofocus></textarea>
@@ -374,7 +380,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path not in ("/", "/index.html"):
             self.send_error(404)
             return
-        body = PAGE.replace("__MODELS__", json.dumps(MODELS)).encode()
+        body = (PAGE.replace("__MODELS__", json.dumps(MODELS))
+                    .replace("__VERSION__", VERSION)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -421,7 +428,7 @@ def main():
     if not api_key():
         print("note: no OpenRouter key found — the Spark (local) model will still work")
     with Server(("127.0.0.1", args.port), Handler) as httpd:
-        print(f"promptx-web → {url}   (ctrl-c to stop)")
+        print(f"promptx-web v{VERSION} → {url}   (ctrl-c to stop)")
         if not args.no_open:
             threading.Timer(0.6, lambda: webbrowser.open(url)).start()
         try:

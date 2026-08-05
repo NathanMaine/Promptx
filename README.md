@@ -75,6 +75,7 @@ promptx -c . --copy "add retry logic to the api client"   # expand, copy to clip
 promptx -c . -x "add retry logic to the api client"       # expand, then run via opencode
 promptx -c . "add retry logic to the api client"          # just print it
 promptx --models                                          # list suggested models
+promptx --version                                         # which promptx is this?
 promptx -m anthropic/claude-haiku-4.5 "..."               # pick a different model
 promptx --local "..."                                     # use your own GPU, free
 promptx -c . --snap "add retry logic"                     # spec + record baseline
@@ -214,6 +215,7 @@ tokens, fast, and it never leaks reasoning traces into the output.
 |---|---|---|
 | `google/gemini-2.5-flash-lite` | $0.10/M | The default. Balanced and clean. |
 | `qwen/qwen3.7-flash` | $0.03/M | Cheapest paid option, 1M context — good for very large project trees. |
+| `qwen/qwen3.8-max` | $2/M in · $6/M out | Flagship Qwen, 1M context — for huge scanned maps where the cheap tier drops structure. |
 | `meta-llama/llama-3.1-8b-instruct` | $0.05/M | Rigid and literal. Use when you already know exactly what you want. |
 | `inclusionai/ling-3.0-flash:free` | free | Rate limited, but fine for occasional use. |
 | `anthropic/claude-haiku-4.5` | ~$1/M | Catches the things you did *not* say. Worth the money on a gnarly refactor. |
@@ -247,6 +249,8 @@ you catch in an hour.
 | [main.py](main.py) | The CLI. Installed as `promptx`. |
 | [web.py](web.py) | Local browser UI. Installed as `promptx-web`. |
 | [server.py](server.py) | The hosted version — multi-user, model descriptions, history. |
+| [promptx_index.py](promptx_index.py) | The structural indexer behind `--scan`. |
+| [promptx_version.py](promptx_version.py) + [VERSION](VERSION) | Which release this is — shown by `--version`, in the UI footers, and at `GET /api/version`. |
 | [install.sh](install.sh) | Installer. |
 | [systemd/promptx.service](systemd/promptx.service) | Keeps `server.py` alive across reboots. |
 | [scripts/add-promptx-tile.sh](scripts/add-promptx-tile.sh) | Adds a promptx tile to a containerized nginx dashboard. |
