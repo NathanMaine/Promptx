@@ -45,10 +45,24 @@ fraction of a cent per request.
 
 ---
 
-## New in 0.2.0 — built for the big repos
+## What's new
 
-The tool that started with a 400-file ceiling and one cheap model just grew
-teeth:
+### 0.3.0 — pick your local engine
+
+The free, nothing-leaves-your-network path now has two lanes, side by side in
+the hosted picker — choose per request:
+
+- **Spark (local · vLLM)** — the quicker lane. Same hardware, faster
+  inference. One model is live at a time, so point
+  `PROMPTX_SPARK_VLLM_MODEL` at whatever's loaded and go.
+- **Spark (local · Ollama)** — the always-loaded lane. Works even when vLLM
+  is serving something else or is down.
+- Either slot takes any OpenAI-compatible endpoint — Ollama, vLLM, LM
+  Studio — via env vars. Your hardware, your call.
+
+### 0.2.0 — built for the big repos
+
+The tool that started with a 400-file ceiling and one cheap model grew teeth:
 
 - **Huge projects are in scope now.** `--scan` indexes **2,000 files by
   default** — five times the old cap — and renders ~60K tokens of structure.
@@ -63,10 +77,10 @@ teeth:
   `promptx --version`, both web UI footers, the server's startup log, and
   `GET /api/version`. No more wondering which copy the NAS is actually
   serving.
-- **Docker deployment where the image IS the version.** Tagged
-  `promptx:0.2.0`, hardened by default: read-only rootfs, read-only project
-  mounts, no-new-privileges, keys never touching the filesystem. Update or
-  roll back with one `docker compose up -d`.
+- **Docker deployment where the image IS the version.** Tagged per release,
+  hardened by default: read-only rootfs, read-only project mounts,
+  no-new-privileges, keys never touching the filesystem. Update or roll back
+  with one `docker compose up -d`.
 
 ---
 
@@ -125,7 +139,9 @@ compare two phrasings side by side.
 ### Hosted, so it's on every device
 
 Run `server.py` on a NAS or any always-on box and it's a bookmark from your
-phone, your laptop, anywhere on the LAN. See
+phone, your laptop, anywhere on the LAN. The hosted picker also carries two
+free local engines — vLLM (quicker) and Ollama (always loaded) — so anyone on
+your network can expand against your own GPU at zero cost. See
 [docs/deployment.md](docs/deployment.md) — it covers the recommended Docker
 deployment (the image carries the version; updates and rollbacks are one
 `docker compose up -d`), plus a systemd unit, because `nohup` does not
@@ -252,13 +268,13 @@ tokens, fast, and it never leaks reasoning traces into the output.
 | `meta-llama/llama-3.1-8b-instruct` | $0.05/M | Rigid and literal. Use when you already know exactly what you want. |
 | `inclusionai/ling-3.0-flash:free` | free | Rate limited, but fine for occasional use. |
 | `anthropic/claude-haiku-4.5` | ~$1/M | Catches the things you did *not* say. Worth the money on a gnarly refactor. |
-| `--local` | free | Your own hardware — the hosted picker has both engines: vLLM (quicker) and Ollama (always loaded). Verbose, `<think>` traces get stripped. |
+| `--local` | free | Your own GPU — private and free. The hosted picker splits this into two engines: vLLM (quicker) and Ollama (always loaded). Verbose, `<think>` traces get stripped. |
 
 **Avoid reasoning models.** This is one-shot rewriting, not a problem to solve.
 Reasoning models burn tokens thinking about it and leak traces into the output.
 Cheap and literal wins. (One sanctioned exception — `deepseek-v4-flash`, cheap
 enough and carrying a 1M window — earns a bigger budget instead. The reasoning
-behind that exception is below, in the longer comparison.)
+behind that exception lives in the longer comparison.)
 
 Longer comparison in [docs/models.md](docs/models.md).
 
@@ -296,7 +312,7 @@ you catch in an hour.
 
 - [docs/documentation.md](docs/documentation.md) — complete reference: every flag, every env var, the HTTP API
 - [docs/models.md](docs/models.md) — picking an expander model, and why reasoning models are wrong here
-- [docs/deployment.md](docs/deployment.md) — hosting it on a NAS or server, with systemd
+- [docs/deployment.md](docs/deployment.md) — hosting it on a NAS or server: Docker (recommended), systemd, and pointing the local options at your own hardware
 - [docs/prompt-design.md](docs/prompt-design.md) — why the system prompt says what it says, and what happened when it didn't
 - [docs/FIELD-NOTES.md](docs/FIELD-NOTES.md) — running log of bugs found in real use, what fixed them, and what is still open
 
